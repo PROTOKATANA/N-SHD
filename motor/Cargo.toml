@@ -1,0 +1,17 @@
+[package]
+# La lógica de los shaders, sin GPU ni interfaz: lo que se prueba con `cargo test`.
+# La GPU (nucleo/, en C++) la lee por cxx.
+name = "shd"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+# la frontera con la GPU; el lado C++ lo genera build.rs
+cxx = "=1.0.205"
+
+[build-dependencies]
+cxx-build = "=1.0.205"
+
+[lints]
+workspace = true

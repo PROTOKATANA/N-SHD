@@ -1,0 +1,15 @@
+[workspace]
+resolver = "3"
+members = ["motor", "visor"]
+
+# Lo que se reparte es el del integrador: esto vale para las pruebas y el visor.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[workspace.lints.clippy]
+# cada bloque unsafe explica por qué es correcto (// SAFETY:)
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+wildcard_imports = "deny"

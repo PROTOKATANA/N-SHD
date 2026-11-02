@@ -1,0 +1,16 @@
+[package]
+# Lo que el visor (un programa de C++) enlaza de Rust: todo el motor, en una biblioteca estática.
+name = "shd_visor"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+shd = { path = "../motor" }
+
+[lints]
+workspace = true
