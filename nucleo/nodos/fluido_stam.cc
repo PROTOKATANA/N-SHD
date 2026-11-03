@@ -168,9 +168,21 @@ public:
 
 		}
 
-		advectar_y_confinar(ctx) ;
+		{
 
-		proyectar(ctx) ;
+			Tramo t(banco_ , primera_ , Etapa :: subir , gpu_.device , ctx) ;
+
+			advectar_y_confinar(ctx) ;
+
+		}
+
+		{
+
+			Tramo t(banco_ , primera_ + 1 , Etapa :: subir , gpu_.device , ctx) ;
+
+			proyectar(ctx) ;
+
+		}
 
 		v_ = 1 - v_ ;
 
@@ -185,6 +197,10 @@ public:
 	IBuffer * escalar() const override { return esc_[v_] ; }
 
 	std :: uint64_t pasos() const override { return pasos_ ; }
+
+	std :: vector<std :: string> tramos() const override { return { "vortice advectar" , "vortice presion" } ; }
+
+	void medir(Medidor * banco , std :: size_t primera) override { banco_ = banco ; primera_ = primera ; }
 
 private:
 
@@ -212,6 +228,10 @@ private:
 	bool iniciado_ = false ;
 
 	std :: uint64_t pasos_ = 0 ;
+
+	Medidor * banco_ = nullptr ;
+
+	std :: size_t primera_ = 0 ;
 
 	Uint64 celdas() const { return static_cast<Uint64>(pedido_.forma.celdas) * pedido_.forma.celdas ; }
 

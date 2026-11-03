@@ -11,6 +11,10 @@
 // AGUJERO_VOLCAR_TIEMPOS, escribe esos fotogramas en PPM, tal como se ven, y
 // sale. Con AGUJERO_RELOJ, el reloj avanza 1/60 s por fotograma. SHD_TAM=<a>x<b>
 // fija el tamaño de la vista, y SHD_LIENZO=<a>x<b> el del arranque.
+//
+// El banco, en los nodos : con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y cada tramo
+// de dentro (banco_visor.h); con SHD_NODOS_MALLA=<c>x<f>, una malla de nodos en vez de los
+// ocho de siempre, para medir el líquido con un grafo grande.
 
 # include <xcb/xcb.h>
 
@@ -53,6 +57,8 @@
 # include "pasada_vortice.h"
 
 # include "pipeline_comun.h"
+
+# include "banco_visor.h"
 
 using namespace Diligent ;
 
@@ -418,9 +424,70 @@ public:
 
 		}
 
+		// con SHD_NODOS_MALLA=CxF, para el banco, un grafo grande : el vórtice y una malla de C × F
+		// nodos, cada uno unido al de su derecha y al de debajo
+
+		std :: uint32_t cols = 0 , filas = 0 ;
+
+		tam_de("SHD_NODOS_MALLA" , cols , filas) ;
+
+		if (cols && filas) {
+
+			nodos_.resize(1) ;
+
+			aristas_.clear() ;
+
+			for (std :: uint32_t y = 0 ; y < filas ; y++) {
+
+				for (std :: uint32_t x = 0 ; x < cols ; x++) {
+
+					const float px = (static_cast<float>(x) - static_cast<float>(cols - 1) * 0.5f) * 40 ;
+
+					const float py = (static_cast<float>(y) - static_cast<float>(filas - 1) * 0.5f) * 40 ;
+
+					nodos_.push_back({ px , py , 8 , colores[(x + y) % 4] }) ;
+
+					const std :: uint32_t i = 1 + y * cols + x ;
+
+					if (x + 1 < cols) { aristas_.insert(aristas_.end() , { i , i + 1 }) ; }
+
+					if (y + 1 < filas) { aristas_.insert(aristas_.end() , { i , i + cols }) ; }
+
+				}
+
+			}
+
+		}
+
 		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>()) ;
 
 		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / 60) : shd :: reloj_monotono() , shd :: nodos :: fabrica_fluido_stam())) ;
+
+		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
+
+		if (std :: getenv("SHD_BANCO_GPU")) {
+
+			banco_ = std :: make_unique<BancoVisor>() ;
+
+			for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+				banco_->nombrar(i , pasadas_[i]->nombre()) ;
+
+				pasadas_[i]->medir(banco_.get() , primer_tramo(i)) ;
+
+			}
+
+		}
+
+	}
+
+	~EscenaNodos() override {
+
+		if (!banco_) { return ; }
+
+		apuntar() ;
+
+		banco_->informar() ;
 
 	}
 
@@ -472,7 +539,15 @@ public:
 
 		gpu_.ctx->UpdateBuffer(uniforme_ , 0 , sizeof(camara_) , &camara_ , RESOURCE_STATE_TRANSITION_MODE_TRANSITION) ;
 
-		for (const auto & p : pasadas_) { p->subir(gpu_.ctx , fotograma_) ; }
+		if (banco_ && medidos_++) { apuntar() ; }
+
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: subir , gpu_.device , gpu_.ctx) ;
+
+			pasadas_[i]->subir(gpu_.ctx , fotograma_) ;
+
+		}
 
 		return true ;
 
@@ -480,7 +555,13 @@ public:
 
 	void pintar(std :: uint32_t , std :: uint32_t) override {
 
-		for (const auto & p : pasadas_) { p->dibujar(gpu_.ctx , fotograma_) ; }
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: dibujar , gpu_.device , gpu_.ctx) ;
+
+			pasadas_[i]->dibujar(gpu_.ctx , fotograma_) ;
+
+		}
 
 	}
 
@@ -497,6 +578,33 @@ private:
 	std :: vector<std :: uint32_t> aristas_ ;
 
 	std :: vector<std :: unique_ptr<shd :: nodos :: Pasada>> pasadas_ ;
+
+	// El banco (SHD_BANCO_GPU) y los fotogramas medidos. Cada pasada mide lo suyo a
+	// partir de su propio tramo : de 16 en 16 detrás de los de las pasadas
+
+	std :: unique_ptr<BancoVisor> banco_ ;
+
+	std :: uint32_t medidos_ = 0 ;
+
+	std :: size_t primer_tramo(std :: size_t pasada) const { return pasadas_.size() + 16 * pasada ; }
+
+	// Lo del fotograma anterior, ya acabado en la GPU, y un informe cada 300
+
+	void apuntar() {
+
+		banco_->terminar(gpu_.ctx) ;
+
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			const std :: vector<std :: string> nombres = pasadas_[i]->tramos() ;
+
+			for (std :: size_t k = 0 ; k < nombres.size() ; k++) { banco_->nombrar(primer_tramo(i) + k , nombres[k]) ; }
+
+		}
+
+		if (medidos_ % 300 == 0) { banco_->informar() ; }
+
+	}
 
 	RefCntAutoPtr<IBuffer> uniforme_ ;
 

@@ -1,5 +1,7 @@
 # pragma once
 
+# include <cstddef>
+
 # include <cstdint>
 
 # include <functional>
@@ -8,6 +10,8 @@
 
 # include <string>
 
+# include <vector>
+
 # include "Buffer.h"
 
 # include "DeviceContext.h"
@@ -15,6 +19,8 @@
 # include "RenderDevice.h"
 
 # include "gpu.h"
+
+# include "medidor.h"
 
 # include "shd/src/nodos/puente.rs.h"
 
@@ -60,6 +66,12 @@ public:
 	virtual Diligent :: IBuffer * escalar() const = 0 ;
 
 	virtual std :: uint64_t pasos() const = 0 ;
+
+	// Lo que mide por dentro, si quiere (como Pasada :: tramos y medir)
+
+	virtual std :: vector<std :: string> tramos() const { return {} ; }
+
+	virtual void medir(Medidor * , std :: size_t) {}
 
 } ;
 

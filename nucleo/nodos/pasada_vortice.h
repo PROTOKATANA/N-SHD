@@ -43,6 +43,12 @@ public:
 
 	const char * nombre() const override { return "vortice" ; }
 
+	// los del fluido, que se crea con el dispositivo
+
+	std :: vector<std :: string> tramos() const override ;
+
+	void medir(Medidor * banco , std :: size_t primera) override ;
+
 private:
 
 	// El fluido, el cbuffer del vórtice y el pipeline del pintado, en un
@@ -63,6 +69,10 @@ private:
 	bool diagnostico_ ;
 
 	bool hay_ = false ;
+
+	Medidor * banco_ = nullptr ;
+
+	std :: size_t primera_ = 0 ;
 
 	void leer_diagnostico(const Gpu & gpu) ;
 

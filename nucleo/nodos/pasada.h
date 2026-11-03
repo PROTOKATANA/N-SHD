@@ -1,5 +1,7 @@
 # pragma once
 
+# include <cstddef>
+
 # include <cstdint>
 
 # include <string>
@@ -11,6 +13,8 @@
 # include "DeviceContext.h"
 
 # include "gpu.h"
+
+# include "medidor.h"
 
 # include "shd/src/nodos/puente.rs.h"
 
@@ -68,6 +72,13 @@ public:
 	// Para los bancos y los registros
 
 	virtual const char * nombre() const = 0 ;
+
+	// Lo que mide por dentro, si quiere : los nombres de sus tramos, y el banco
+	// donde medirlos, en `primera`, `primera` + 1… Sin banco no mide nada
+
+	virtual std :: vector<std :: string> tramos() const { return {} ; }
+
+	virtual void medir(Medidor * , std :: size_t) {}
 
 } ;
 
