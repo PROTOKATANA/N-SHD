@@ -405,9 +405,10 @@ mod tests {
         );
     }
 
-    /// Si las listas no caben, una sola celda con todos los elementos, en orden.
+    /// Si las listas no caben con 32 × 32 celdas, celdas más grandes: caben, y cada una con sus
+    /// elementos en el orden de siempre.
     #[test]
-    fn si_no_cabe_vuelve_a_la_lista_completa() {
+    fn si_no_caben_las_listas_agranda_las_celdas() {
         // 256 nodos en dos esquinas opuestas, unidos en cruz: cada enlace cruza la caja entera
         let nodos: Vec<Nodo> = (0..256)
             .map(|i| {
@@ -423,13 +424,39 @@ mod tests {
         let mut l = LiquidoGpu::vacio();
         let mut caja = [0.0; 4];
         assert!(rellenar_liquido(&escena(256), &nodos, &pares, &mut l, &mut caja, true));
-        assert!(l.rejilla[3] == 1.0 && l.cuenta[3] == 1.0, "una sola celda");
-        let total = 256 + l.cuenta[2] as u32;
-        assert_eq!(l.celdas[0][0], total << 16, "la celda lleva todos");
-        for k in 0..total as usize {
-            let doble = l.indices[k / 8][(k / 2) % 4];
-            let e = if k % 2 == 1 { doble >> 16 } else { doble & 0xFFFF };
-            assert_eq!(e as usize, k, "en el orden de siempre");
+        let (cols, filas) = (l.rejilla[3] as usize, l.cuenta[3] as usize);
+        assert!(cols * filas < REJILLA_MAX_CELDAS, "con 32 × 32 no caben: más grandes");
+        assert!(cols * filas > 1, "pero no una sola");
+        let mut total = 0;
+        for c in 0..cols * filas {
+            let w = l.celdas[c / 4][c % 4];
+            let (inicio, cuantos) = (w & 0xFFFF, w >> 16);
+            total += cuantos;
+            let mut antes = None;
+            for k in inicio as usize..(inicio + cuantos) as usize {
+                let doble = l.indices[k / 8][(k / 2) % 4];
+                let e = if k % 2 == 1 { doble >> 16 } else { doble & 0xFFFF };
+                assert!(antes < Some(e), "en el orden de siempre");
+                antes = Some(e);
+            }
         }
+        assert!(total <= REJILLA_MAX_INDICES, "y caben");
+    }
+
+    /// Si caben, las celdas más pequeñas: 32 a lo largo de la caja.
+    #[test]
+    fn si_caben_las_celdas_son_las_mas_pequenas() {
+        let nodos: Vec<Nodo> = (0..9).map(|i| nodo(i as f32 * 40.0, 0.0, 10.0, 0xffff_ffff)).collect();
+        let mut l = LiquidoGpu::vacio();
+        let mut caja = [0.0; 4];
+        assert!(rellenar_liquido(
+            &escena(9),
+            &nodos,
+            &[0, 1, 1, 2],
+            &mut l,
+            &mut caja,
+            true
+        ));
+        assert_eq!(l.rejilla[3] as u32, REJILLA_MAX_LADO, "32 a lo ancho");
     }
 }

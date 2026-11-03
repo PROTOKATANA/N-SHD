@@ -7,6 +7,11 @@
 //! sin rejilla en las 12 configuraciones de las pruebas (0/255; con 3 k, 1/255 en una), y en la GPU
 //! real la textura sale idéntica (0 píxeles distintos). Medido con 256 nodos en una textura de
 //! 2560x1080: el fotograma de GPU pasa de 9,8 ms a 0,8-1,2 ms de mediana.
+//!
+//! Las celdas, las más pequeñas en las que caben las listas. Medido (banco del visor, 800 × 600, la
+//! misma imagen byte a byte): con celdas del tamaño del nodo mayor, 0,191 ms con 9 nodos, 2,64 con
+//! una malla de 12 × 9 y 4,83 con una de 16 × 16; con las más pequeñas, 0,096, 0,31 y 0,57. En la
+//! CPU cuesta entre 26 y 63 µs más por fotograma (de 1 a 27 µs con 9 nodos, de 53 a 116 con 256).
 
 use super::super::puente::LiquidoGpu;
 use super::{ALCANCE_FUSION, FORMA, MAX_ARISTAS, MAX_NODOS, mayor, menor};
@@ -19,7 +24,8 @@ pub const REJILLA_MAX_CELDAS: usize = (REJILLA_MAX_LADO * REJILLA_MAX_LADO) as u
 /// Entradas de todas las listas (16 bits): lo que queda del cbuffer hasta 64 KiB.
 pub const REJILLA_MAX_INDICES: u32 = 24544;
 
-/// De `lo` a `hi`; un NaN pasa.
+/// De `lo` a `hi`; un NaN pasa. Lo usa la prueba del trozo de fila, que repite la prueba de antes.
+#[cfg(test)]
 fn acotar(v: f32, lo: f32, hi: f32) -> f32 {
     if v < lo {
         lo
@@ -104,66 +110,161 @@ impl Reparto<'_> {
             alcance = menor(self.radio(a), self.radio(b)) * self.influencia_enlace + self.aa + self.media_diagonal;
         }
         for y in y0..=y1 {
-            for x in x0..=x1 {
-                if enlace {
-                    let px = self.caja[0] + (x as f32 + 0.5) * self.lado;
-                    let py = self.caja[1] + (y as f32 + 0.5) * self.lado;
-                    let largo2 = mayor(abx * abx + aby * aby, 1e-6);
-                    let t = acotar(((px - ax) * abx + (py - ay) * aby) / largo2, 0.0, 1.0);
-                    if (px - ax - abx * t).hypot(py - ay - aby * t) > alcance {
-                        continue;
+            let (mut desde, mut hasta) = (x0, x1);
+            if enlace {
+                // las celdas de la fila con el centro a menos de `alcance` del segmento, sin probarlas
+                // una a una: probar cada celda costaba casi todo el reparto con celdas pequeñas
+                let py = self.caja[1] + (y as f32 + 0.5) * self.lado;
+                match tramo_de_fila(ax, ay, abx, aby, alcance, py) {
+                    None => continue,
+                    Some((lo, hi)) if lo.is_finite() && hi.is_finite() => {
+                        // un poco más ancho: de sobra no cambia nada, y de menos se perdería una celda
+                        let holgura = self.lado * 1e-3;
+                        let a = ((lo - holgura - self.caja[0]) / self.lado - 0.5).ceil();
+                        let b = ((hi + holgura - self.caja[0]) / self.lado - 0.5).floor();
+                        if b < x0 as f32 || a > x1 as f32 || b < a {
+                            continue;
+                        }
+                        desde = mayor(a, x0 as f32) as u32;
+                        hasta = menor(b, x1 as f32) as u32;
                     }
+                    // un NaN: la fila entera, como cualquier otra cosa que no se sabe dónde cae
+                    Some(_) => {}
                 }
+            }
+            for x in desde..=hasta {
                 f((y * self.cols + x) as usize);
             }
         }
     }
 }
 
+/// El trozo de la fila `py` a menos de `r` del segmento de `a` a `a + ab`. La cápsula es convexa: es
+/// un solo intervalo, el de los círculos de los extremos y la franja de en medio juntos.
+fn tramo_de_fila(ax: f32, ay: f32, abx: f32, aby: f32, r: f32, py: f32) -> Option<(f32, f32)> {
+    // con un NaN no se sabe dónde cae: que decida quien llama
+    if ![ax, ay, abx, aby, r, py].iter().all(|v| v.is_finite()) {
+        return Some((f32::NAN, f32::NAN));
+    }
+    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for (cx, cy) in [(ax, ay), (ax + abx, ay + aby)] {
+        let dy = py - cy;
+        let h2 = r * r - dy * dy;
+        if h2 >= 0.0 {
+            let h = h2.sqrt();
+            lo = menor(lo, cx - h);
+            hi = mayor(hi, cx + h);
+        }
+    }
+    let largo = (abx * abx + aby * aby).sqrt();
+    if largo > 1e-6 {
+        let (ux, uy, dy) = (abx / largo, aby / largo, py - ay);
+        // a menos de r de la recta: |(x - ax)·uy - dy·ux| <= r
+        let (mut a, mut b) = (f32::NEG_INFINITY, f32::INFINITY);
+        if uy.abs() > 1e-9 {
+            let (p, q) = ((dy * ux - r) / uy, (dy * ux + r) / uy);
+            (a, b) = (mayor(a, menor(p, q)), menor(b, mayor(p, q)));
+        } else if (dy * ux).abs() > r {
+            return (lo <= hi).then_some((lo, hi));
+        }
+        // y con la proyección entre los extremos: 0 <= (x - ax)·ux + dy·uy <= largo
+        if ux.abs() > 1e-9 {
+            let (p, q) = (-dy * uy / ux, (largo - dy * uy) / ux);
+            (a, b) = (mayor(a, menor(p, q)), menor(b, mayor(p, q)));
+        } else if dy * uy < 0.0 || dy * uy > largo {
+            return (lo <= hi).then_some((lo, hi));
+        }
+        if a <= b {
+            lo = menor(lo, ax + a);
+            hi = mayor(hi, ax + b);
+        }
+    }
+    (lo <= hi).then_some((lo, hi))
+}
+
 /// Reparte los elementos en la rejilla. Cada uno va a las celdas que toca su influencia: su radio en
-/// la smin más la fusión y el suavizado. Dos pasadas (contar y rellenar), sin reservar: las listas
-/// salen en el orden de los elementos, el mismo de la lista completa.
+/// la smin más la fusión y el suavizado. Una pasada por la geometría, que apunta cada par celda y
+/// elemento en un búfer de este hilo que se reutiliza: las listas salen en el orden de los
+/// elementos, el mismo de la lista completa.
 pub(super) fn repartir(l: &mut LiquidoGpu, nn: u32, na: u32, caja: &[f32; 4], aa: f32, con_rejilla: bool) {
     let influencia_nodo = FORMA.gota + FORMA.fusion * ALCANCE_FUSION;
     let influencia_enlace = FORMA.cuello + FORMA.fusion * ALCANCE_FUSION;
     let ancho = caja[2] - caja[0];
     let alto = caja[3] - caja[1];
-    // celdas del tamaño de la influencia de un nodo, sin pasar de 32 por lado
-    let mut lado = 0.0;
-    for i in 0..nn as usize {
-        lado = mayor(lado, l.nodos[i][2] * influencia_nodo);
-    }
-    let lados = REJILLA_MAX_LADO as f32;
-    lado = mayor(mayor(mayor(lado, ancho / lados), alto / lados), 1e-6);
-    let en_celdas = |medida: f32| ((medida / lado).ceil() as u32).clamp(1, REJILLA_MAX_LADO);
-    let reparto = Reparto {
-        nodos: &l.nodos,
-        aristas: &l.aristas,
-        nn,
-        caja,
-        aa,
-        influencia_nodo,
-        influencia_enlace,
-        lado,
-        cols: en_celdas(ancho),
-        filas: en_celdas(alto),
-        // redondeado por arriba, para no quedarse corto
-        #[allow(clippy::approx_constant)]
-        media_diagonal: lado * 0.70711,
+    let reparto_de = |lado: f32| {
+        let en_celdas = |medida: f32| ((medida / lado).ceil() as u32).clamp(1, REJILLA_MAX_LADO);
+        Reparto {
+            nodos: &l.nodos,
+            aristas: &l.aristas,
+            nn,
+            caja,
+            aa,
+            influencia_nodo,
+            influencia_enlace,
+            lado,
+            cols: en_celdas(ancho),
+            filas: en_celdas(alto),
+            // redondeado por arriba, para no quedarse corto
+            #[allow(clippy::approx_constant)]
+            media_diagonal: lado * 0.70711,
+        }
     };
+    // Las celdas más pequeñas en las que caben las listas: cada píxel recorre solo los elementos
+    // de la suya, y cuanto más pequeña, menos. Medido (banco del visor, 9 nodos): con 32 × 32 el
+    // líquido tarda la mitad que con celdas del tamaño del nodo mayor, 0,097 frente a 0,191 ms.
+    // Si no caben, el doble de grandes, hasta una sola celda
+    let lados = REJILLA_MAX_LADO as f32;
+    let mut lado = mayor(mayor(ancho / lados, alto / lados), 1e-6);
     let elementos = nn + na;
     let mut cuantos = [0_u32; REJILLA_MAX_CELDAS];
-    let mut total = 0_u32;
-    for e in 0..elementos {
-        reparto.por_celda(e, |c| {
-            cuantos[c] += 1;
-            total += 1;
-        });
-    }
+    let (rejilla, cabe) = PARES.with_borrow_mut(|pares| {
+        let (reparto, total) = loop {
+            let reparto = reparto_de(lado);
+            cuantos.fill(0);
+            pares.clear();
+            let mut total = 0_u32;
+            for e in 0..elementos {
+                reparto.por_celda(e, |c| {
+                    cuantos[c] += 1;
+                    total += 1;
+                    pares.push(((c as u32) << 16) | e);
+                });
+                // ya no cabe: no hace falta seguir contando
+                if total > REJILLA_MAX_INDICES && con_rejilla && reparto.cols * reparto.filas > 1 {
+                    break;
+                }
+            }
+            if total <= REJILLA_MAX_INDICES || !con_rejilla || reparto.cols * reparto.filas == 1 {
+                break (reparto, total);
+            }
+            lado *= 2.0;
+        };
+        let cabe = con_rejilla && total <= REJILLA_MAX_INDICES;
+        ((reparto.cols, reparto.filas, reparto.lado), cabe)
+    });
+    PARES.with_borrow(|pares| rellenar_listas(l, &mut cuantos, pares, elementos, caja, cabe, rejilla));
+}
+
+thread_local! {
+    /// Los pares celda y elemento del reparto (celda << 16 | elemento): se reutiliza en cada fotograma.
+    static PARES: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Las listas de cada celda en el cbuffer, de los pares ya apuntados. Si no caben, una sola celda con
+/// todo.
+fn rellenar_listas(
+    l: &mut LiquidoGpu,
+    cuantos: &mut [u32; REJILLA_MAX_CELDAS],
+    pares: &[u32],
+    elementos: u32,
+    caja: &[f32; 4],
+    cabe: bool,
+    (cols, filas, lado): (u32, u32, f32),
+) {
+    let (ancho, alto) = (caja[2] - caja[0], caja[3] - caja[1]);
     // si las listas no caben, una sola celda con todo: la lista completa de siempre (más lento,
     // igual de correcto)
-    let cabe = con_rejilla && total <= REJILLA_MAX_INDICES;
-    let (cols, filas) = if cabe { (reparto.cols, reparto.filas) } else { (1, 1) };
+    let (cols, filas) = if cabe { (cols, filas) } else { (1, 1) };
     if !cabe {
         cuantos.fill(0);
         cuantos[0] = elementos;
@@ -186,10 +287,12 @@ pub(super) fn repartir(l: &mut LiquidoGpu, nn: u32, na: u32, caja: &[f32; 4], aa
             (*par & 0xFFFF_0000) | e
         };
     };
-    for e in 0..elementos {
-        if cabe {
-            reparto.por_celda(e, |c| apuntar(c, e));
-        } else {
+    if cabe {
+        for &p in pares {
+            apuntar((p >> 16) as usize, p & 0xFFFF);
+        }
+    } else {
+        for e in 0..elementos {
             apuntar(0, e);
         }
     }
@@ -204,4 +307,51 @@ pub(super) fn repartir(l: &mut LiquidoGpu, nn: u32, na: u32, caja: &[f32; 4], aa
         cols as f32,
     ];
     l.cuenta[3] = filas as f32;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// El trozo de cada fila coge todas las celdas que cogía probarlas una a una (centro a menos del
+    /// alcance del segmento) y, de más, solo alguna justo en el borde.
+    #[test]
+    fn el_trozo_de_fila_es_el_de_probar_celda_a_celda() {
+        let mut azar = 12345_u32;
+        let mut siguiente = || {
+            azar ^= azar << 13;
+            azar ^= azar >> 17;
+            azar ^= azar << 5;
+            azar as f32 / u32::MAX as f32
+        };
+        let lado = 7.0;
+        for _ in 0..3000 {
+            let (ax, ay) = (siguiente() * 200.0, siguiente() * 200.0);
+            // también horizontales, verticales y de un punto
+            let (mut abx, mut aby) = (siguiente() * 160.0 - 80.0, siguiente() * 160.0 - 80.0);
+            match (siguiente() * 8.0) as u32 {
+                0 => aby = 0.0,
+                1 => abx = 0.0,
+                2 => (abx, aby) = (0.0, 0.0),
+                _ => {}
+            }
+            let r = 1.0 + siguiente() * 30.0;
+            for y in 0..40 {
+                let py = (y as f32 + 0.5) * lado;
+                let tramo = tramo_de_fila(ax, ay, abx, aby, r, py);
+                for x in 0..40 {
+                    let px = (x as f32 + 0.5) * lado;
+                    let largo2 = mayor(abx * abx + aby * aby, 1e-6);
+                    let t = acotar(((px - ax) * abx + (py - ay) * aby) / largo2, 0.0, 1.0);
+                    let d = (px - ax - abx * t).hypot(py - ay - aby * t);
+                    let dentro = tramo.is_some_and(|(lo, hi)| px >= lo - 1e-3 && px <= hi + 1e-3);
+                    if d <= r {
+                        assert!(dentro, "falta la celda {x}, {y}: a {d} de {r}");
+                    } else if dentro {
+                        assert!(d <= r + 0.01, "sobra la celda {x}, {y}: a {d} de {r}");
+                    }
+                }
+            }
+        }
+    }
 }

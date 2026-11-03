@@ -27,7 +27,7 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
 **`nodos`:** dos pasadas para dibujar un grafo.
 
 - `PasadaLiquido`: los enlaces como un líquido. Es un campo de distancia evaluado en un quad, con una
-  rejilla de culling. Admite 256 nodos y 512 enlaces, porque es para un menú.
+  rejilla de culling de celdas tan pequeñas como quepan. Admite 256 nodos y 512 enlaces, porque es para un menú.
 - `PasadaVortice`: un nodo que es un remolino de fluido de verdad, Stable Fluids en compute shaders. Al
   pulsarlo, se agita.
 
