@@ -2,6 +2,8 @@
 
 # include <utility>
 
+# include "bloque_hlsl.h"
+
 # include "computo.h"
 
 using namespace Diligent ;
@@ -95,22 +97,65 @@ void main(uint3 id : SV_DispatchThreadID) {
   div_sal[i] = div - fuente(c);
 })" ;
 
-// Una iteración de Jacobi de la presión; en la pared, la de la celda (sin
-// flujo a través)
+// K iteraciones de Jacobi de la presión en cada lanzamiento, en bloques (bloque_hlsl.h); en
+// la pared, la de la celda (sin flujo a través). Cada celda suma en el mismo orden que con un
+// lanzamiento por iteración : el resultado es el mismo bit a bit
 
 constexpr const char * jacobi_hlsl = R"(
 StructuredBuffer<float> pres_ent;
 StructuredBuffer<float> div_ent;
 RWStructuredBuffer<float> pres_sal;
-float p_en(int2 c, float propia) { return es_fluido(c) ? pres_ent[indice(c)] : propia; }
-[numthreads(8, 8, 1)]
-void main(uint3 id : SV_DispatchThreadID) {
-  int2 c = int2(id.xy);
-  int i = indice(c);
-  if (!es_fluido(c)) { pres_sal[i] = 0.0; return; }
-  float p = pres_ent[i];
-  pres_sal[i] = (p_en(c + DX, p) + p_en(c - DX, p) + p_en(c + DY, p) + p_en(c - DY, p) - div_ent[i]) * 0.25;
+groupshared uint b_fluido[CELDAS_B];
+groupshared float b_div[CELDAS_B];
+groupshared float b_pres[CELDAS_B];
+float p_b(uint e, float propia) { return b_fluido[e] != 0u ? b_pres[e] : propia; }
+[numthreads(T_B, T_B, 1)]
+void main(uint3 g : SV_GroupID, uint3 t : SV_GroupThreadID) {
+  int2 origen = int2(g.xy) * T - K;
+  uint hilo = t.y * uint(T_B) + t.x;
+  for (uint s = hilo; s < CELDAS_B; s += HILOS_B) {
+    int2 c = celda_b(origen, s);
+    b_fluido[s] = es_fluido(c) ? 1u : 0u;
+    int i = indice(clamp(c, 0, N - 1));
+    b_div[s] = div_ent[i];
+    b_pres[s] = pres_ent[i];
+  }
+  GroupMemoryBarrierWithGroupSync();
+  for (int it = 0; it < K; ++it) {
+    float nuevo[POR_HILO];
+    for (uint q = 0u; q < POR_HILO; ++q) {
+      uint s = min(hilo + q * HILOS_B, CELDAS_B - 1u);
+      nuevo[q] = b_pres[s];
+      if (!interior_b(s)) continue;
+      if (b_fluido[s] == 0u) { nuevo[q] = 0.0; continue; }
+      float p = b_pres[s];
+      nuevo[q] = (p_b(puesto_b(s, 1, 0), p) + p_b(puesto_b(s, -1, 0), p) + p_b(puesto_b(s, 0, 1), p) + p_b(puesto_b(s, 0, -1), p) - b_div[s]) * 0.25;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint q = 0u; q < POR_HILO; ++q) { uint s = hilo + q * HILOS_B; if (s < CELDAS_B) b_pres[s] = nuevo[q]; }
+    GroupMemoryBarrierWithGroupSync();
+  }
+  int2 l = int2(t.xy) + K;
+  int2 c = origen + l;
+  if (all(c >= 0) && all(c < N)) pres_sal[indice(c)] = b_pres[uint(l.y * R + l.x)];
 })" ;
+
+// El lado de los bloques de Jacobi, y lo más que itera cada lanzamiento : las iteraciones del
+// fluido se reparten en lanzamientos iguales. Medido (banco del visor, 30 iteraciones en
+// 128 × 128) : la presión, de 0,065 ms (30 lanzamientos) a 0,042 con bloques de 16 y 5 por
+// lanzamiento (con 3, lo mismo); con 6 o 10, o con bloques de 32, entre 0,044 y 0,061
+
+constexpr Uint32 lado_bloque = 16 , iter_bloque_max = 5 ;
+
+// cuántas en cada lanzamiento : las más que dividen a `jacobi`, sin pasar del tope
+
+Uint32 iteraciones_por_lanzamiento(Uint32 jacobi) {
+
+	for (Uint32 k = iter_bloque_max ; k > 1 ; k--) { if (jacobi % k == 0) { return k ; } }
+
+	return 1 ;
+
+}
 
 // Resta el gradiente de presión (queda incompresible), no deja atravesar la
 // pared y guarda la presión, algo amortiguada, para empezar el siguiente paso
@@ -225,6 +270,10 @@ private:
 
 	int v_ = 0 , p_ = 0 ;
 
+	// las iteraciones de Jacobi de cada lanzamiento
+
+	Uint32 iter_ = 1 ;
+
 	bool iniciado_ = false ;
 
 	std :: uint64_t pasos_ = 0 ;
@@ -269,6 +318,22 @@ private:
 
 		} ;
 
+		// Jacobi, en bloques de lado_bloque, con sus iteraciones por lanzamiento
+
+		const auto kernel_jacobi = [&] {
+
+			iter_ = iteraciones_por_lanzamiento(pedido_.forma.jacobi) ;
+
+			const std :: string con_k = "#define K " + std :: to_string(iter_) + "\n#define T_B " + std :: to_string(lado_bloque) + "\n" + bloque_hlsl + jacobi_hlsl ;
+
+			const Uint32 bloques = (pedido_.forma.celdas + lado_bloque - 1) / lado_bloque ;
+
+			jacobi_ = gpu_kernel(gpu_ , { "Nodos fluido jacobi" , base + con_k , { { "Fluido" , uniforme_ } , { pedido_.efecto.c_str() , cbuffer_efecto } } , bloques , bloques } , error) ;
+
+			return jacobi_.pipeline.RawPtr() != nullptr ;
+
+		} ;
+
 		return kernel("Nodos fluido iniciar" , iniciar_hlsl , iniciar_)
 
 			&& kernel("Nodos fluido advectar" , advectar_hlsl , advectar_)
@@ -279,7 +344,7 @@ private:
 
 			&& kernel("Nodos fluido divergencia" , divergencia_hlsl , divergencia_)
 
-			&& kernel("Nodos fluido jacobi" , jacobi_hlsl , jacobi_)
+			&& kernel_jacobi()
 
 			&& kernel("Nodos fluido proyectar" , proyectar_hlsl , proyectar_) ;
 
@@ -401,7 +466,7 @@ private:
 
 		gpu_lanzar(ctx , divergencia_ , divergencia_b_[v_]) ;
 
-		for (std :: uint32_t j = 0 ; j < pedido_.forma.jacobi ; j++) {
+		for (std :: uint32_t j = 0 ; j < pedido_.forma.jacobi / iter_ ; j++) {
 
 			gpu_lanzar(ctx , jacobi_ , jacobi_b_[p_]) ;
 
