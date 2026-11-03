@@ -11,3 +11,4 @@
 - El banco del visor: `SHD_BANCO_GPU` y `SHD_NODOS_MALLA`; `Pasada` y `Fluido` dicen qué miden por dentro.
 - El líquido de los enlaces, con las celdas de su rejilla tan pequeñas como quepan: la misma imagen, de 0,18 a 0,09 ms con 9 nodos y de 4,6 a 0,54 ms con una malla de 16 × 16.
 - El Jacobi del vórtice, en bloques de 16 × 16 con 5 iteraciones por lanzamiento (`nucleo/comun/bloque_hlsl.h`): el mismo resultado bit a bit, de 0,062 a 0,042 ms.
+- El informe de RAYO y LEGO sobre los nodos, con cada medida: `nucleo/nodos/RAYO-LEGO.md`.

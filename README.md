@@ -41,7 +41,7 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
   Los bordes salen de `Escena`: sin `ancho` y `alto`, no hay. Con `vortice_libre`, `PasadaLiquido` no pinta el círculo
   del vórtice alrededor, y los enlaces llegan hasta el contorno real del líquido.
   Va en piezas (partículas, campo, canales y pintura; `nucleo/nodos/gota_*`), y con `AGUJERO_RELOJ` se repite bit a
-  bit.
+  bit. Cómo se midió y qué se cambió, en `nucleo/nodos/RAYO-LEGO.md`.
 
 ## Integrar N-SHD
 
