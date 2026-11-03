@@ -101,6 +101,21 @@ Diligent :: RefCntAutoPtr<Diligent :: IShaderResourceBinding> gpu_atar(const Ker
 
 void gpu_lanzar(Diligent :: IDeviceContext * ctx , const Kernel & k , Diligent :: IShaderResourceBinding * atado) ;
 
+// Lo mismo, y espera a que se escriba lo de `escritos` antes del siguiente : una barrera
+// entre dos kernels que escriben y leen el mismo buffer como UAV
+
+void gpu_lanzar(
+
+	Diligent :: IDeviceContext * ctx ,
+
+	const Kernel & k ,
+
+	Diligent :: IShaderResourceBinding * atado ,
+
+	std :: initializer_list<Diligent :: IBuffer *> escritos
+
+) ;
+
 // Un campo : un buffer estructurado de `elementos` de `paso` bytes, a ceros,
 // que se lee y se escribe desde los shaders
 

@@ -2,15 +2,22 @@
 // poner quien integra los shaders. Crea el dispositivo, abre una ventana, pinta
 // en una textura y la copia a la ventana.
 //
-//   shd_visor [agujero|nodos]
+//   shd_visor [agujero|nodos|gota]
 //
-// Teclas : 1 el agujero, 2 los nodos, q o Esc salir. Agujero : botón izquierdo
-// orbita, derecho rueda, doble clic agita. Nodos : clic en el vórtice lo agita.
+// Teclas : 1 el agujero, 2 los nodos, 3 la gota, q o Esc salir. Agujero : botón izquierdo
+// orbita, derecho rueda, doble clic agita. Nodos : arrastrar mueve cualquier nodo,
+// también el vórtice, contra otro nodo o contra los bordes, y un clic en el vórtice
+// lo agita.
 //
 // Sin ventana, para comparar : con AGUJERO_VOLCAR=<carpeta> y
 // AGUJERO_VOLCAR_TIEMPOS, escribe esos fotogramas en PPM, tal como se ven, y
-// sale. Con AGUJERO_RELOJ, el reloj avanza 1/60 s por fotograma. SHD_TAM=<a>x<b>
-// fija el tamaño de la vista, y SHD_LIENZO=<a>x<b> el del arranque.
+// sale. Con AGUJERO_RELOJ, el reloj avanza 1/60 s por fotograma (en los nodos, 1/SHD_NODOS_FPS). SHD_TAM=<a>x<b>
+// fija el tamaño de la vista, y SHD_LIENZO=<a>x<b> el del arranque. En los nodos,
+// SHD_NODOS_VOLCAR=<f1,f2…> vuelca esos fotogramas, y SHD_NODOS_GUION mueve los
+// nodos solo, para ver los choques sin ratón ; con SHD_NODOS_GUION=arrastre, el
+// vórtice va de lado a lado cada vez más rápido; con SHD_NODOS_GUION=pared, atraviesa una
+// pared de nodos y se aleja; con SHD_NODOS_GUION=cerca, se acerca a un enlace ajeno hasta
+// cruzarlo.
 //
 // El banco, en los nodos : con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y cada tramo
 // de dentro (banco_visor.h); con SHD_NODOS_MALLA=<c>x<f>, una malla de nodos en vez de los
@@ -36,6 +43,8 @@
 
 # include <string>
 
+# include <utility>
+
 # include <vector>
 
 # include "EngineFactoryVk.h"
@@ -51,6 +60,8 @@
 # include "computo.h"
 
 # include "fluido_stam.h"
+
+# include "pasada_gota.h"
 
 # include "pasada_liquido.h"
 
@@ -72,9 +83,9 @@ constexpr std :: uint32_t alto_inicial = 800 ;
 
 constexpr double doble_clic_s = 0.4 ;
 
-// Cuándo se vuelca la escena de los nodos
+// Cuándo se vuelca la escena de los nodos, si no se dice
 
-constexpr std :: uint32_t fotogramas_nodos = 120 ;
+constexpr std :: uint32_t fotograma_nodos = 120 ;
 
 // Lo que se recibe de la ventana en un fotograma
 
@@ -115,6 +126,38 @@ void tam_de(const char * variable , std :: uint32_t & ancho , std :: uint32_t & 
 		alto = b ;
 
 	}
+
+}
+
+// Los fotogramas de SHD_NODOS_VOLCAR, en orden
+
+std :: vector<std :: uint32_t> fotogramas_pedidos() {
+
+	std :: vector<std :: uint32_t> lista ;
+
+	if (const char * texto = std :: getenv("SHD_NODOS_VOLCAR")) {
+
+		std :: string resto(texto) ;
+
+		while (!resto.empty()) {
+
+			const std :: size_t coma = resto.find(',') ;
+
+			const int f = std :: atoi(resto.substr(0 , coma).c_str()) ;
+
+			if (f > 0) { lista.push_back(static_cast<std :: uint32_t>(f)) ; }
+
+			resto = coma == std :: string :: npos ? std :: string() : resto.substr(coma + 1) ;
+
+		}
+
+	}
+
+	if (lista.empty()) { lista.push_back(fotograma_nodos) ; }
+
+	std :: sort(lista.begin() , lista.end()) ;
+
+	return lista ;
 
 }
 
@@ -194,7 +237,7 @@ public:
 
 	bool cerrar = false ;
 
-	// 1 o 2 si se pulsó, 0 si no
+	// 1, 2 o 3 si se pulsó, 0 si no
 
 	int tecla = 0 ;
 
@@ -292,7 +335,7 @@ private:
 
 			case XCB_KEY_PRESS : {
 
-				// códigos de tecla de X : 10 y 11 el 1 y el 2; 9 Esc, 24 q
+				// códigos de tecla de X : 10 a 12 del 1 al 3; 9 Esc, 24 q
 
 				const int k = reinterpret_cast<const xcb_key_press_event_t *>(e)->detail ;
 
@@ -301,6 +344,8 @@ private:
 				if (k == 10) { tecla = 1 ; }
 
 				if (k == 11) { tecla = 2 ; }
+
+				if (k == 12) { tecla = 3 ; }
 
 				break ;
 
@@ -402,7 +447,7 @@ class EscenaNodos final : public Escena {
 
 public:
 
-	explicit EscenaNodos(const shd :: Gpu & gpu) : gpu_(gpu) {
+	EscenaNodos(const shd :: Gpu & gpu , bool gota) : gota_(gota) , gpu_(gpu) {
 
 		// un vórtice en el centro y ocho nodos alrededor, unidos a él y en anillo
 
@@ -461,7 +506,13 @@ public:
 
 		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>()) ;
 
-		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / 60) : shd :: reloj_monotono() , shd :: nodos :: fabrica_fluido_stam())) ;
+		const char * fps = std :: getenv("SHD_NODOS_FPS") ;
+
+		shd :: Reloj reloj = std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / (fps ? std :: atof(fps) : 60.0)) : shd :: reloj_monotono() ;
+
+		if (gota) { pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj))) ; }
+
+		else { pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: move(reloj) , shd :: nodos :: fabrica_fluido_stam())) ; }
 
 		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
 
@@ -521,11 +572,15 @@ public:
 
 		escena_.vortice = 1 ;
 
-		// un clic sobre el vórtice lo agita
+		escena_.vortice_libre = gota_ ;
 
-		const float dx = raton.x - static_cast<float>(ancho) * 0.5f , dy = raton.y - static_cast<float>(alto) * 0.5f ;
+		escena_.ancho = ancho ;
 
-		if (raton.toques && std :: hypot(dx , dy) < radio_vortice * escena_.escala) { escena_.pulsos += raton.toques ; }
+		escena_.alto = alto ;
+
+		agarrar(ancho , alto , raton) ;
+
+		if (guion_) { seguir_guion(ancho) ; }
 
 		fotograma_ = { escena_ , &nodos_ , &aristas_ , uniforme_ } ;
 
@@ -570,6 +625,249 @@ public:
 private:
 
 	static constexpr float radio_vortice = 60 ;
+
+	// Lo que el vórtice se acerca al borde derecho en el guion, en mundo
+
+	static constexpr float sobra_borde = 42 ;
+
+	// Lo que dura el guion, en fotogramas
+
+	static constexpr std :: uint32_t vuelta_guion = 420 ;
+
+	static constexpr std :: uint32_t vuelta_arrastre = 1700 ;
+
+	static constexpr std :: uint32_t vuelta_pared = 480 ;
+
+	static constexpr std :: uint32_t vuelta_cerca = 360 ;
+
+	const bool gota_ ;
+
+	const char * nombre_guion_ = std :: getenv("SHD_NODOS_GUION") ;
+
+	const bool guion_ = nombre_guion_ != nullptr ;
+
+	const bool guion_arrastre_ = guion_ && std :: strcmp(nombre_guion_ , "arrastre") == 0 ;
+
+	const bool guion_pared_ = guion_ && std :: strcmp(nombre_guion_ , "pared") == 0 ;
+
+	const bool guion_cerca_ = guion_ && std :: strcmp(nombre_guion_ , "cerca") == 0 ;
+
+	std :: uint32_t cuenta_ = 0 ;
+
+	int agarrado_ = -1 ;
+
+	bool movido_ = false ;
+
+	// Lo que hay del cursor al centro del nodo agarrado, en mundo
+
+	float agarre_x_ = 0 ;
+
+	float agarre_y_ = 0 ;
+
+	// Arrastrar mueve el nodo, y un clic en el vórtice sin moverlo lo agita
+
+	void agarrar(std :: uint32_t ancho , std :: uint32_t alto , const Raton & raton) {
+
+		const float x = (raton.x - static_cast<float>(ancho) * 0.5f) / escena_.escala ;
+
+		const float y = (raton.y - static_cast<float>(alto) * 0.5f) / escena_.escala ;
+
+		if (raton.toques && agarrado_ < 0) {
+
+			for (std :: size_t i = 0 ; i < nodos_.size() ; i++) {
+
+				if (std :: hypot(x - nodos_[i].x , y - nodos_[i].y) > nodos_[i].radio) { continue ; }
+
+				agarrado_ = static_cast<int>(i) ;
+
+				agarre_x_ = nodos_[i].x - x ;
+
+				agarre_y_ = nodos_[i].y - y ;
+
+				movido_ = false ;
+
+				break ;
+
+			}
+
+		}
+
+		if (agarrado_ < 0) { return ; }
+
+		shd :: nodos :: Nodo & n = nodos_[static_cast<std :: size_t>(agarrado_)] ;
+
+		movido_ = movido_ || std :: hypot(x + agarre_x_ - n.x , y + agarre_y_ - n.y) > 2 ;
+
+		if (movido_) {
+
+			// sin salir de la ventana más de lo que se puede aplastar
+
+			const float dentro_x = std :: max(static_cast<float>(ancho) * 0.5f / escena_.escala - n.radio * 0.7f , 0.0f) ;
+
+			const float dentro_y = std :: max(static_cast<float>(alto) * 0.5f / escena_.escala - n.radio * 0.7f , 0.0f) ;
+
+			n.x = std :: clamp(x + agarre_x_ , -dentro_x , dentro_x) ;
+
+			n.y = std :: clamp(y + agarre_y_ , -dentro_y , dentro_y) ;
+
+		}
+
+		if (raton.izquierdo) { return ; }
+
+		if (agarrado_ == 0 && !movido_) { escena_.pulsos++ ; }
+
+		agarrado_ = -1 ;
+
+	}
+
+	// De `a` a `b` entre los fotogramas `desde` y `hasta`
+
+	float tramo(float a , float b , std :: uint32_t desde , std :: uint32_t hasta) const {
+
+		const float t = std :: clamp((static_cast<float>(cuenta_) - static_cast<float>(desde)) / static_cast<float>(hasta - desde) , 0.0f , 1.0f) ;
+
+		return a + (b - a) * t ;
+
+	}
+
+	// Un enlace entre dos nodos que pasa cerca del vórtice, sin ser suyo : el vórtice se le
+	// acerca despacio hasta cruzarlo. Mientras no lo toca, no debe unirse a él
+
+	void seguir_cerca() {
+
+		cuenta_ = cuenta_ % vuelta_cerca + 1 ;
+
+		for (std :: size_t i = 1 ; i < nodos_.size() ; i++) {
+
+			const float x = i == 1 ? -170.0f : i == 2 ? 170.0f : (static_cast<float>(i) - 5.5f) * 70 ;
+
+			const float y = i <= 2 ? 90.0f : -190.0f ;
+
+			nodos_[i] = { x , y , 16 , nodos_[i].rgba } ;
+
+		}
+
+		nodos_[0].x = 0 ;
+
+		nodos_[0].y = tramo(0 , 90 , 30 , 330) ;
+
+	}
+
+	// Una pared de tres nodos que se tocan : el vórtice la atraviesa, se queda al otro lado,
+	// se aleja y vuelve. Lo que quede atrapado detrás no debe cruzarla
+
+	void seguir_pared() {
+
+		cuenta_ = cuenta_ % vuelta_pared + 1 ;
+
+		for (std :: size_t i = 1 ; i < nodos_.size() ; i++) {
+
+			const float y = i <= 3 ? (static_cast<float>(i) - 2) * 32 : (i % 2 == 0 ? 180.0f : -180.0f) ;
+
+			const float x = i <= 3 ? 0.0f : (static_cast<float>(i / 2) - 2.5f) * 100 ;
+
+			nodos_[i] = { x , y , 16 , nodos_[i].rgba } ;
+
+		}
+
+		const float x = cuenta_ < 200 ? tramo(-120 , 110 , 40 , 80) : tramo(110 , 200 , 200 , 230) ;
+
+		nodos_[0].x = cuenta_ < 330 ? x : tramo(200 , -120 , 330 , 380) ;
+
+		nodos_[0].y = 0 ;
+
+	}
+
+	// El vórtice de lado a lado sin chocar con nada, a 1, 2,5, 5, 10 y 20 radios por
+	// segundo, con una pausa tras cada tramo : para ver si el líquido va con su nodo.
+	// Luego, a lo bruto : contra el borde, contra un nodo y barriendo una fila de ellos
+
+	void seguir_arrastre() {
+
+		struct Tramo { float ax ; float ay ; float bx ; float by ; std :: uint32_t desde ; std :: uint32_t hasta ; } ;
+
+		static constexpr Tramo tramos[] = {
+
+			{ 0 , 0 , -150 , 0 , 0 , 30 } , { -150 , 0 , 150 , 0 , 90 , 390 } , { 150 , 0 , -150 , 0 , 450 , 570 } ,
+
+			{ -150 , 0 , 150 , 0 , 630 , 690 } , { 150 , 0 , -150 , 0 , 750 , 780 } , { -150 , 0 , 150 , 0 , 840 , 855 } ,
+
+			{ 150 , 0 , 225 , 0 , 915 , 919 } , { 225 , 0 , 100 , 0 , 975 , 990 } , { 100 , 0 , 100 , -125 , 1035 , 1040 } ,
+
+			{ 100 , -125 , -200 , -125 , 1095 , 1125 } , { -200 , -125 , 0 , 0 , 1185 , 1215 }
+
+		} ;
+
+		cuenta_ = cuenta_ % vuelta_arrastre + 1 ;
+
+		// y al final, doce clics seguidos
+
+		if (cuenta_ >= 1275 && cuenta_ < 1395 && cuenta_ % 10 == 5) { escena_.pulsos++ ; }
+
+		for (const Tramo & t : tramos) {
+
+			if (cuenta_ < t.desde) { continue ; }
+
+			nodos_[0].x = tramo(t.ax , t.bx , t.desde , t.hasta) ;
+
+			nodos_[0].y = tramo(t.ay , t.by , t.desde , t.hasta) ;
+
+		}
+
+		// los demás, arriba y abajo : fuera de su camino
+
+		for (std :: size_t i = 1 ; i < nodos_.size() ; i++) {
+
+			const float lado = i % 2 == 0 ? 1.0f : -1.0f ;
+
+			nodos_[i] = { (static_cast<float>(i / 2) - 2) * 100 , lado * 170 , nodos_[i].radio , nodos_[i].rgba } ;
+
+		}
+
+	}
+
+	// Un nodo entra en el vórtice y sale, y luego el vórtice se aplasta contra el
+	// borde derecho
+
+	void seguir_guion(std :: uint32_t ancho) {
+
+		if (guion_arrastre_) {
+
+			seguir_arrastre() ;
+
+			return ;
+
+		}
+
+		if (guion_pared_) {
+
+			seguir_pared() ;
+
+			return ;
+
+		}
+
+		if (guion_cerca_) {
+
+			seguir_cerca() ;
+
+			return ;
+
+		}
+
+		// una vuelta tras otra
+
+		cuenta_ = cuenta_ % vuelta_guion + 1 ;
+
+		nodos_[1].x = cuenta_ < 200 ? tramo(170 , 58 , 60 , 110) : tramo(58 , 170 , 200 , 250) ;
+
+		nodos_[1].y = tramo(0 , -240 , 250 , 290) ;
+
+		const float borde = static_cast<float>(ancho) * 0.5f / escena_.escala ;
+
+		nodos_[0].x = tramo(0 , borde - sobra_borde , 300 , 350) ;
+
+	}
 
 	shd :: Gpu gpu_ ;
 
@@ -840,7 +1138,7 @@ struct Lienzo {
 
 std :: unique_ptr<Escena> escena_de(int cual , const shd :: Gpu & gpu , std :: uint32_t lienzo_ancho , std :: uint32_t lienzo_alto) {
 
-	if (cual == 2) { return std :: make_unique<EscenaNodos>(gpu) ; }
+	if (cual >= 2) { return std :: make_unique<EscenaNodos>(gpu , cual == 3) ; }
 
 	return std :: make_unique<EscenaAgujero>(gpu , lienzo_ancho , lienzo_alto) ;
 
@@ -850,7 +1148,11 @@ std :: unique_ptr<Escena> escena_de(int cual , const shd :: Gpu & gpu , std :: u
 
 int main(int argc , char ** argv) {
 
-	int cual = argc > 1 && std :: strcmp(argv[1] , "nodos") == 0 ? 2 : 1 ;
+	int cual = 1 ;
+
+	if (argc > 1 && std :: strcmp(argv[1] , "nodos") == 0) { cual = 2 ; }
+
+	if (argc > 1 && std :: strcmp(argv[1] , "gota") == 0) { cual = 3 ; }
 
 	Ventana ventana ;
 
@@ -984,11 +1286,15 @@ int main(int argc , char ** argv) {
 
 	const char * volcados = std :: getenv("AGUJERO_VOLCAR") ;
 
+	const bool presentar_volcando = std :: getenv("SHD_VOLCAR_PRESENTANDO") != nullptr ;
+
 	Lienzo lienzo ;
 
 	Raton raton ;
 
 	std :: uint32_t fotogramas = 0 ;
+
+	const std :: vector<std :: uint32_t> pedidos = fotogramas_pedidos() ;
 
 	std :: unique_ptr<Escena> escena = escena_de(cual , gpu , lienzo_ancho , lienzo_alto) ;
 
@@ -1030,13 +1336,19 @@ int main(int argc , char ** argv) {
 
 		escena->pintar(ancho , alto) ;
 
-		// los nodos no tienen guion : un fotograma, a los dos segundos
+		// los nodos, en los fotogramas pedidos
 
-		if (volcados && cual == 2 && ++fotogramas == fotogramas_nodos) {
+		if (volcados && cual >= 2) {
 
-			lienzo.volcar(ctx , std :: string(volcados) + "/nodos.ppm") ;
+			fotogramas++ ;
 
-			break ;
+			if (std :: find(pedidos.begin() , pedidos.end() , fotogramas) != pedidos.end()) {
+
+				lienzo.volcar(ctx , std :: string(volcados) + "/nodos-" + std :: to_string(fotogramas) + ".ppm") ;
+
+			}
+
+			if (fotogramas >= pedidos.back()) { break ; }
 
 		}
 
@@ -1064,9 +1376,10 @@ int main(int argc , char ** argv) {
 
 		}
 
-		// con volcados, solo a la textura : cada fotograma, igual en cada ejecución
+		// con volcados, solo a la textura : cada fotograma, igual en cada ejecución. Con
+		// SHD_VOLCAR_PRESENTANDO, también a la ventana, como se usa de verdad
 
-		if (volcados) {
+		if (volcados && !presentar_volcando) {
 
 			ctx->Flush() ;
 

@@ -39,7 +39,7 @@ cbuffer Liquido {
   float4 forma;           // gota, cuello, fusión, opacidad
   float4 cuenta;          // oscurecer, nodos, enlaces, filas de la rejilla
   float4 rejilla;         // x0, y0, lado de celda (mundo), columnas
-  float4 nodos[256];      // x, y, radio que se ve (mundo), 0
+  float4 nodos[256];      // x, y, radio que se ve (mundo), lo que se hunde su gota (mundo)
   float4 colores[256];    // rgba
   uint4 aristas[256];     // dos enlaces por elemento: (a0, b0, a1, b1)
   uint4 celdas[256];      // por celda: inicio (16 bits bajos) y cuántos (16 altos)
@@ -78,7 +78,7 @@ float4 main(in Entrada i) : SV_TARGET {
     uint e = (k & 1u) != 0u ? (doble >> 16) : (doble & 0xFFFFu);
     if (e < nn) {
       float r = nodos[e].z;
-      d = smin(length(p - nodos[e].xy) - forma.x * r, d, forma.z * r, h);
+      d = smin(length(p - nodos[e].xy) - forma.x * r + nodos[e].w, d, forma.z * r, h);
       col = lerp(col, colores[e].rgb, h);
     } else {
       uint q = e - nn;

@@ -314,6 +314,18 @@ void gpu_lanzar(IDeviceContext * ctx , const Kernel & k , IShaderResourceBinding
 
 }
 
+void gpu_lanzar(IDeviceContext * ctx , const Kernel & k , IShaderResourceBinding * atado , std :: initializer_list<IBuffer *> escritos) {
+
+	gpu_lanzar(ctx , k , atado) ;
+
+	std :: vector<StateTransitionDesc> barreras ;
+
+	for (IBuffer * e : escritos) { barreras.emplace_back(e , RESOURCE_STATE_UNORDERED_ACCESS , RESOURCE_STATE_UNORDERED_ACCESS , STATE_TRANSITION_FLAG_UPDATE_STATE) ; }
+
+	ctx->TransitionResourceStates(static_cast<Uint32>(barreras.size()) , barreras.data()) ;
+
+}
+
 RefCntAutoPtr<IBuffer> gpu_campo(const Gpu & gpu , const DescCampo & d) {
 
 	BufferDesc desc ;
