@@ -29,6 +29,9 @@ pub struct FormaLiquido {
     pub oscurecer: f32,
     /// La del vórtice, que ocupa su nodo entero: solo asoma alrededor.
     pub gota_vortice: f32,
+    /// La del vórtice que es un líquido suelto: queda debajo de él, para que no asome un círculo
+    /// fijo cuando se deforma. Los enlaces llegan hasta ahí, y el líquido los tapa por su contorno.
+    pub gota_vortice_libre: f32,
 }
 
 pub const FORMA: FormaLiquido = FormaLiquido {
@@ -38,6 +41,7 @@ pub const FORMA: FormaLiquido = FormaLiquido {
     opacidad: 0.55,
     oscurecer: 0.25,
     gota_vortice: 1.15,
+    gota_vortice_libre: 0.3,
 };
 
 pub const ALCANCE_FUSION: f32 = 4.0;
@@ -88,7 +92,13 @@ pub fn rellenar_liquido(
     for (i, p) in n.iter().enumerate() {
         let es_vortice = i + 1 == escena.vortice as usize;
         let radio = p.radio * factor * if es_vortice { encoge_vortice } else { 1.0 };
-        liquido.nodos[i] = [p.x, p.y, radio, 0.0];
+        // solo se hunde la gota: el radio sigue siendo el mismo para los enlaces y la fusión
+        let hundir = if es_vortice && escena.vortice_libre {
+            (FORMA.gota_vortice - FORMA.gota_vortice_libre) * p.radio * factor
+        } else {
+            0.0
+        };
+        liquido.nodos[i] = [p.x, p.y, radio, hundir];
         liquido.colores[i] = color_rgba(p.rgba);
         let margen = radio * (FORMA.gota + FORMA.fusion) + 2.0 / escena.escala;
         caja[0] = menor(caja[0], p.x - margen);
@@ -227,6 +237,34 @@ mod tests {
         e.vortice = 2;
         rellenar_liquido(&e, &nodos, &[], &mut l, &mut caja, true);
         assert!(cerca(l.nodos[1][2] * FORMA.gota, 20.0 * FORMA.gota_vortice) && cerca(l.nodos[0][2], 5.0));
+        assert!(
+            cerca(l.nodos[1][3], 0.0) && cerca(l.nodos[0][3], 0.0),
+            "rígido, no se hunde"
+        );
+    }
+
+    #[test]
+    fn la_gota_del_vortice_libre_se_hunde_bajo_el_y_no_cambia_nada_mas() {
+        let nodos = [nodo(0.0, 0.0, 5.0, 0xffff_ffff), nodo(100.0, 0.0, 20.0, 0xffff_ffff)];
+        let rigido = Escena {
+            vortice: 2,
+            ..escena(2)
+        };
+        let libre = Escena {
+            vortice_libre: true,
+            ..rigido
+        };
+        let (mut a, mut b) = (LiquidoGpu::vacio(), LiquidoGpu::vacio());
+        let (mut caja_a, mut caja_b) = ([0.0; 4], [0.0; 4]);
+        rellenar_liquido(&rigido, &nodos, &[0, 1], &mut a, &mut caja_a, true);
+        rellenar_liquido(&libre, &nodos, &[0, 1], &mut b, &mut caja_b, true);
+        // lo que se ve de su gota: gota × radio − lo que se hunde
+        let visible = FORMA.gota * b.nodos[1][2] - b.nodos[1][3];
+        assert!(cerca(visible, 20.0 * FORMA.gota_vortice_libre));
+        assert!(visible < 20.0, "queda debajo del líquido");
+        assert!(cerca(b.nodos[1][2], a.nodos[1][2]), "el radio de los enlaces no cambia");
+        assert_eq!(caja_a, caja_b);
+        assert_eq!(b.nodos[0], a.nodos[0], "los demás nodos, igual");
     }
 
     // ---- la cuenta del shader (pasada_liquido), copiada aquí ----
@@ -261,7 +299,11 @@ mod tests {
             if e < nn {
                 let n = l.nodos[e as usize];
                 let r = n[2];
-                let (d, h) = smin_ref((px - n[0]).hypot(py - n[1]) - l.forma[0] * r, m.d, l.forma[2] * r);
+                let (d, h) = smin_ref(
+                    (px - n[0]).hypot(py - n[1]) - l.forma[0] * r + n[3],
+                    m.d,
+                    l.forma[2] * r,
+                );
                 m.d = d;
                 for j in 0..3 {
                     m.col[j] += h * (l.colores[e as usize][j] - m.col[j]);

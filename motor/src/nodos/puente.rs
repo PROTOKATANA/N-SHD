@@ -37,6 +37,12 @@ mod ffi {
         vortice: u32,
         /// Veces que se pulsó el vórtice: al cambiar, se reorganiza.
         pulsos: u32,
+        /// Tamaño de la vista en píxeles, para sus bordes; 0, sin bordes.
+        ancho: u32,
+        alto: u32,
+        /// El vórtice es un líquido suelto (`PasadaGota`): su forma cambia, así que en el líquido de
+        /// los enlaces su gota no asoma alrededor, o se vería un círculo fijo debajo.
+        vortice_libre: bool,
     }
 
     /// El cbuffer «Camara» que comparten las pasadas.
@@ -58,7 +64,7 @@ mod ffi {
         cuenta: [f32; 4],
         /// x0, y0, lado de celda (mundo), columnas.
         rejilla: [f32; 4],
-        /// x, y, radio que se ve (mundo), 0.
+        /// x, y, radio que se ve (mundo), lo que se hunde su gota (mundo).
         nodos: [[f32; 4]; 256],
         /// rgba.
         colores: [[f32; 4]; 256],
