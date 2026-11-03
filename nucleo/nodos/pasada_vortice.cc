@@ -299,6 +299,8 @@ bool PasadaVortice :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu
 
 		recursos_->fluido = fabrica_({ forma , forzamiento_hlsl , "Vortice" }) ;
 
+		recursos_->fluido->medir(banco_ , primera_) ;
+
 		if (!recursos_->crear(gpu , f.uniforme_camara , error)) {
 
 			recursos_.reset() ;
@@ -375,6 +377,24 @@ void PasadaVortice :: leer_diagnostico(const Gpu & gpu) {
 	) ;
 
 	gpu.aviso(texto) ;
+
+}
+
+std :: vector<std :: string> PasadaVortice :: tramos() const {
+
+	if (!recursos_ || !recursos_->fluido) { return {} ; }
+
+	return recursos_->fluido->tramos() ;
+
+}
+
+void PasadaVortice :: medir(Medidor * banco , std :: size_t primera) {
+
+	banco_ = banco ;
+
+	primera_ = primera ;
+
+	if (recursos_ && recursos_->fluido) { recursos_->fluido->medir(banco , primera) ; }
 
 }
 

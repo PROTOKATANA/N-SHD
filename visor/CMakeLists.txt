@@ -9,6 +9,7 @@ find_package(Vulkan REQUIRED)
 
 add_executable(shd_visor
   "visor.cc"
+  "banco_visor.cc"
 )
 target_compile_options(shd_visor PRIVATE -Wall -Wextra -Wpedantic -Werror "$<$<NOT:$<CONFIG:Debug>>:-O3>")
 target_compile_definitions(shd_visor PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")

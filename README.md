@@ -104,6 +104,14 @@ AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> AGUJERO_VOLCAR_TIEMPOS=2.5,8,20 SHD_TAM
 Con volcados el visor no presenta en la ventana: presentando, el polvo deja de ser repetible a partir de
 unos 10 s, por una causa sin identificar.
 
+**Banco de la GPU:** con `SHD_BANCO_GPU=1`, en los nodos, lo que tarda cada pasada y cada tramo de dentro, con el
+mínimo, la mediana y el p95 cada 300 fotogramas y al salir. `SHD_NODOS_MALLA=16x16` dibuja una malla de nodos para medir
+el líquido con un grafo grande:
+
+```bash
+AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> SHD_TAM=800x600 SHD_BANCO_GPU=1 build/visor/shd_visor nodos
+```
+
 ## Licencias
 
 El código propio es MIT (`LICENSE`). DiligentCore se descarga aparte y conserva la suya, Apache 2.0.
