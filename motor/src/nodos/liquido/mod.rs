@@ -44,6 +44,10 @@ pub const FORMA: FormaLiquido = FormaLiquido {
     gota_vortice_libre: 0.3,
 };
 
+/// radios del vórtice: lo que asoma, alrededor de la gota envuelta, el anillo que le pinta el
+/// líquido de los enlaces. La gota choca con la vista a esa distancia, para que quepa.
+pub const ANILLO: f32 = FORMA.gota_vortice - 1.0;
+
 pub const ALCANCE_FUSION: f32 = 4.0;
 
 fn menor(a: f32, b: f32) -> f32 {
@@ -89,6 +93,7 @@ pub fn rellenar_liquido(
     // el vórtice ocupa su nodo entero (el remolino mide su radio): su gota es más pequeña, para que
     // solo asome alrededor
     let encoge_vortice = FORMA.gota_vortice / FORMA.gota;
+    liquido.anillo = [0.0; 4];
     for (i, p) in n.iter().enumerate() {
         let es_vortice = i + 1 == escena.vortice as usize;
         let radio = p.radio * factor * if es_vortice { encoge_vortice } else { 1.0 };
@@ -99,7 +104,13 @@ pub fn rellenar_liquido(
             0.0
         };
         liquido.nodos[i] = [p.x, p.y, radio, hundir];
-        liquido.colores[i] = color_rgba(p.rgba);
+        let [r, g, b, _] = color_rgba(p.rgba);
+        // la del vórtice envuelto es su anillo, que sigue a la gota (`anillo`)
+        let envuelve = es_vortice && !escena.vortice_libre;
+        liquido.colores[i] = [r, g, b, if envuelve { 1.0 } else { 0.0 }];
+        if envuelve {
+            liquido.anillo = [p.x, p.y, p.radio * factor, ANILLO];
+        }
         let margen = radio * (FORMA.gota + FORMA.fusion) + 2.0 / escena.escala;
         caja[0] = menor(caja[0], p.x - margen);
         caja[1] = menor(caja[1], p.y - margen);

@@ -19,3 +19,8 @@
 - `Pasada :: preparar` no avanza nada que dependa del tiempo: la gota y el vórtice avanzan al subir. Un integrador que
   prepara y abandona el fotograma (sin imagen libre) les quitaba tiempo: en CORTEX, con los nodos moviéndose, la gota
   simulaba 41-90 subpasos por segundo de 120. La misma imagen en el visor.
+- La gota envuelta (sin vórtice libre): el líquido de los enlaces le pinta un anillo
+  que sigue su forma, leyendo de la gota lo lejos que queda (`DistanciaGota`, la distancia de sus canales); sus canales
+  son solo sus enlaces, un 70 % más cortos, y choca con la vista a lo que asoma el anillo. Más barata que la libre
+  (simular 0,754 ms frente a 0,83; pintar 0,097 frente a 0,13); el líquido, de 0,133 a 0,139. En el visor, con
+  `SHD_GOTA_ENVUELTA`. Ver RAYO-LEGO.md.

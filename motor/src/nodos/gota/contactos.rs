@@ -1,7 +1,7 @@
 //! Con qué choca el líquido y con qué fuerza: los nodos más cercanos, los bordes de la vista y lo que
 //! entra en el círculo del vórtice, recordado de un fotograma al siguiente.
 
-use super::super::liquido::FORMA as LIQUIDO;
+use super::super::liquido::{ANILLO, FORMA as LIQUIDO};
 use super::super::puente::{Escena, GotaGpu, Nodo};
 use super::{FORMA, MARGEN};
 
@@ -16,6 +16,21 @@ const SIN_BORDE: f32 = 1e3;
 
 /// radios: lo más que barre un nodo en un fotograma. Si salta más, se recoloca, no empuja.
 const BARRIDO_MAX: f32 = 1.5;
+
+/// Los bordes de lo que se ve, en mundo (x0, y0, x1, y1): la vista de ancho × alto centrada en la
+/// escena. Solo con tamaño y escala.
+fn vista(escena: &Escena) -> [f32; 4] {
+    let (medio_x, medio_y) = (
+        escena.ancho as f32 * 0.5 / escena.escala,
+        escena.alto as f32 * 0.5 / escena.escala,
+    );
+    [
+        escena.centro_x - medio_x,
+        escena.centro_y - medio_y,
+        escena.centro_x + medio_x,
+        escena.centro_y + medio_y,
+    ]
+}
 
 /// Lo que se recuerda de un fotograma al siguiente: cuánto se hundía cada cosa en el círculo del
 /// nodo, para saber a qué velocidad choca.
@@ -110,18 +125,17 @@ impl Contactos {
                 }
             }
         }
-        // los bordes de la vista, en el orden x0, y0, x1, y1
+        // los bordes de la vista, en el orden x0, y0, x1, y1. Envuelta, la gota choca antes, a lo
+        // que asoma su anillo (ANILLO) : contra el borde lo tapaba entero
         let mut bordes = [-SIN_BORDE, -SIN_BORDE, SIN_BORDE, SIN_BORDE];
         if bien && escena.ancho > 0 && escena.alto > 0 && escena.escala > 0.0 {
-            let (medio_x, medio_y) = (
-                escena.ancho as f32 * 0.5 / escena.escala,
-                escena.alto as f32 * 0.5 / escena.escala,
-            );
+            let v = vista(escena);
+            let anillo = if escena.vortice_libre { 0.0 } else { ANILLO };
             bordes = [
-                (escena.centro_x - medio_x - c.x) / radio,
-                (escena.centro_y - medio_y - c.y) / radio,
-                (escena.centro_x + medio_x - c.x) / radio,
-                (escena.centro_y + medio_y - c.y) / radio,
+                (v[0] - c.x) / radio + anillo,
+                (v[1] - c.y) / radio + anillo,
+                (v[2] - c.x) / radio - anillo,
+                (v[3] - c.y) / radio - anillo,
             ];
             let direcciones = [(-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0)];
             for (k, (x, y)) in direcciones.into_iter().enumerate() {
@@ -185,11 +199,24 @@ mod tests {
         let e = Escena {
             ancho: 400,
             alto: 200,
+            vortice_libre: true,
             ..escena()
         };
         let g = rellenar(&mut Contactos::default(), &e, &nodos);
         // la vista va de -200 a 200 y de -100 a 100, y el vórtice mide 10
         assert_eq!(g.bordes, [-30.0, -15.0, 10.0, 5.0]);
+        // envuelta, a lo que asoma su anillo antes
+        let envuelta = Escena {
+            vortice_libre: false,
+            ..e
+        };
+        let g = rellenar(&mut Contactos::default(), &envuelta, &nodos);
+        let esperado = [-30.0 + ANILLO, -15.0 + ANILLO, 10.0 - ANILLO, 5.0 - ANILLO];
+        assert!(
+            g.bordes.iter().zip(esperado).all(|(a, b)| (a - b).abs() < 1e-5),
+            "{:?}",
+            g.bordes
+        );
     }
 
     #[test]

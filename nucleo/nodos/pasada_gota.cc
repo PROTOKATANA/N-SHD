@@ -125,6 +125,8 @@ PasadaGota :: PasadaGota(Reloj reloj) : reloj_(std :: move(reloj)) , estado_(est
 
 PasadaGota :: ~PasadaGota() = default ;
 
+IBuffer * PasadaGota :: distancia_gota() const { return recursos_ ? recursos_->canales.cerca() : nullptr ; }
+
 std :: vector<std :: string> PasadaGota :: tramos() const {
 
 	std :: vector<std :: string> todos = ParticulasGota :: tramos() ;

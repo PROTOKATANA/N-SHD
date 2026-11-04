@@ -4,6 +4,8 @@
 
 # include <string>
 
+# include "distancia_gota.h"
+
 # include "pasada.h"
 
 namespace shd :: nodos {
@@ -20,9 +22,11 @@ class PasadaLiquido : public Pasada {
 public:
 
 	// `con_rejilla` en false : la lista completa en cada píxel, para comparar
-	// lo que se pinta con y sin rejilla
+	// lo que se pinta con y sin rejilla. `gota`, si la hay : la del vórtice envuelto
+	// (sin vórtice libre) es un anillo alrededor de la gota, que sigue su forma. No es
+	// suya : quien las crea la mantiene viva mientras viva esta
 
-	explicit PasadaLiquido(bool con_rejilla = true) ;
+	explicit PasadaLiquido(bool con_rejilla = true , const DistanciaGota * gota = nullptr) ;
 
 	~PasadaLiquido() override ;
 
@@ -43,6 +47,12 @@ private:
 	LiquidoGpu liquido_{} ;
 
 	bool con_rejilla_ ;
+
+	const DistanciaGota * gota_ ;
+
+	// la distancia que tiene atada el pintado : cambia si la gota se rehace
+
+	Diligent :: IBuffer * atada_ = nullptr ;
 
 	bool hay_ = false ;
 

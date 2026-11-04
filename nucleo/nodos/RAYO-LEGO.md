@@ -214,6 +214,40 @@ Un arreglo, no una optimización, con RAYO aplicado a lo que mide.
   preparados en 2 s; la gota simulaba 41-90 subpasos por segundo, y ahora 119-120, los de siempre.
 - **Prueba**: el oro, idéntico (en el visor nada se abandona).
 
+## Después: la gota envuelta (2026-11-04)
+
+La gota con su física, envuelta en un anillo del líquido de los enlaces que sigue su forma (sin
+vórtice libre). Banco del visor (`SHD_BANCO_GPU`, `SHD_GOTA_ENVUELTA`, guion `arrastre`,
+1280 × 800), tres tandas alternas; exactitud, los 811 fotogramas de los cuatro guiones, envuelta y
+libre, byte a byte contra la versión anterior.
+
+### LEGO
+
+- **El anillo sigue a la gota por una interfaz** (`DistanciaGota`, distancia_gota.h): el líquido de
+  los enlaces solo conoce «lo lejos que queda la gota», no la gota; `PasadaGota` la da con la
+  distancia que ya calculan sus canales (`cerca`). Se inyecta al crear el líquido (gpu_graph.cc, el
+  visor); sin ella, el líquido es el de siempre, el mismo shader.
+- **Cada cosa, una vez**: el grosor del anillo es `ANILLO` (liquido); lo usan el relleno del
+  líquido y los bordes de la gota (contactos). La vista se calcula en contactos, el único que la usa.
+- **Fuera lo que el anillo hizo inútil**: el círculo aplastado contra la vista (su caja, las
+  esquinas redondeadas, el centrado dentro de ella) y la pared que contenía la gota.
+- **Sin pruebas de C++**: N-SHD no tiene arnés con GPU; un falso de `DistanciaGota` exigiría montar
+  uno, y no compensa por una interfaz de un método. Lo de la CPU, con pruebas de Rust (cercano y
+  contactos: canales solo propios, círculo del vórtice hundido, bordes a lo que asoma el anillo).
+
+### RAYO
+
+- **Coste de la gota envuelta** (frente a la libre): simular 0,754 ms (0,83), pintar 0,097 (0,13),
+  el líquido 0,139 (0,133). Menos canales: solo los suyos, y un 70 % más cortos.
+- **Ir directo al anillo** (§7, no hacer trabajo inútil): el nodo envuelto calculaba su círculo y lo
+  tiraba. El líquido, de 0,140 a 0,139 ms; la misma imagen.
+- **Descartado, saltar los bloques sin líquido** en Jacobi: un bloque sin canal ni gota da 0, y se
+  podía escribir sin iterar (la misma imagen bit a bit). Envuelta, 0,070 → 0,070 ms; libre, 0,076 →
+  0,078. Lo pesan los lanzamientos, no esos bloques. Fuera; y por lo mismo, no se probó en `alcance`.
+- **Donde está el tiempo**: la presión de las partículas (0,212 ms), el líquido de los enlaces
+  (0,139), los trozos sueltos (0,103) y el campo (0,082). La presión es la física de la gota, ya
+  medida antes en este informe.
+
 ## Lo que pide una decisión
 
 1. **El reparto del líquido en la CPU** (6): de 26 a 63 µs más por fotograma a cambio de hasta

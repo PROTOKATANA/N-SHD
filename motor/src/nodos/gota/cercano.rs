@@ -37,9 +37,13 @@ pub(super) fn liquido_cercano(
         };
         nodos[j].radio * factor * encoge
     };
+    // Sin vórtice libre, la gota va envuelta en el anillo que le pinta el líquido de los enlaces
+    // y es una esfera : sus canales son solo sus enlaces. Lo ajeno que pasa cerca o por debajo no cuenta,
+    // o su canal pintaba sobre el borde de la gota y la cortaba en recto; la deforman los nodos
+    let envuelta = !escena.vortice_libre;
     // los más cercanos al borde del vórtice, y luego en su orden, que es el de la unión suave
     let mut cerca: Vec<(f32, usize)> = (0..cuantos)
-        .filter(|j| bien(&nodos[*j]))
+        .filter(|j| bien(&nodos[*j]) && (!envuelta || *j == i))
         .map(|j| {
             let n = nodos[j];
             let borde = ((n.x - c.x).hypot(n.y - c.y) - LIQUIDO.gota * radio_liquido(j)) / unidad - 1.0;
@@ -55,7 +59,10 @@ pub(super) fn liquido_cercano(
     for (k, j) in dentro.iter().enumerate() {
         let n = nodos[*j];
         let r = radio_liquido(*j);
-        let hundir = if *j == i && escena.vortice_libre {
+        // La del vórtice, siempre hundida bajo la gota : los canales salen de ella. Envuelta, el
+        // líquido de los enlaces le pinta un anillo; si el canal copiara su círculo, su líquido
+        // lo llenaría y lo taparía
+        let hundir = if *j == i {
             (LIQUIDO.gota_vortice - LIQUIDO.gota_vortice_libre) * n.radio * factor
         } else {
             0.0
@@ -77,6 +84,9 @@ pub(super) fn liquido_cercano(
         .filter_map(|(orden, par)| {
             let (a, b) = (par[0] as usize, par[1] as usize);
             if a == b || a >= cuantos || b >= cuantos || !bien(&nodos[a]) || !bien(&nodos[b]) {
+                return None;
+            }
+            if envuelta && a != i && b != i {
                 return None;
             }
             let lejos = if dentro.contains(&a) || dentro.contains(&b) {
@@ -140,6 +150,7 @@ mod tests {
         let mut g = GotaGpu::default();
         let e = Escena {
             cuenta_nodos: 3,
+            vortice_libre: true,
             ..escena()
         };
         // uno cerca, unido al vórtice, y otro lejos, unido al de cerca
@@ -163,6 +174,7 @@ mod tests {
         let mut g = GotaGpu::default();
         let e = Escena {
             cuenta_nodos: 3,
+            vortice_libre: true,
             ..escena()
         };
         // dos nodos lejos, a cada lado, unidos por un enlace que pasa por debajo del vórtice
@@ -181,5 +193,56 @@ mod tests {
             (distancia_al_centro([3.0, 4.0], [6.0, 8.0]) - 5.0).abs() < 1e-6,
             "el extremo más cercano"
         );
+    }
+
+    #[test]
+    fn el_canal_nunca_copia_el_circulo_del_vortice() {
+        // el canal nunca copia el círculo del vórtice, sea libre o envuelta
+        let nodos = [nodo(0.0, 0.0, 10.0), nodo(25.0, 0.0, 2.0)];
+        let radio = |libre: bool| {
+            let mut g = GotaGpu::default();
+            let e = Escena {
+                cuenta_nodos: 2,
+                vortice_libre: libre,
+                ..escena()
+            };
+            liquido_cercano(&e, &nodos, &[0, 1], 0, 1.0, &mut g);
+            g.gotas[0][2]
+        };
+        assert_eq!(radio(false), radio(true));
+        assert!(
+            (radio(true) - LIQUIDO.gota_vortice_libre).abs() < 1e-5,
+            "hundida bajo la gota"
+        );
+    }
+
+    #[test]
+    fn envuelta_sus_canales_son_solo_sus_enlaces() {
+        // uno suyo y uno ajeno que pasa por debajo, entre dos nodos cerca
+        let nodos = [
+            nodo(0.0, 0.0, 10.0),
+            nodo(25.0, 0.0, 2.0),
+            nodo(-15.0, 5.0, 2.0),
+            nodo(15.0, 5.0, 2.0),
+        ];
+        let rellenar = |libre: bool| {
+            let mut g = GotaGpu::default();
+            let e = Escena {
+                cuenta_nodos: 4,
+                vortice_libre: libre,
+                ..escena()
+            };
+            liquido_cercano(&e, &nodos, &[0, 1, 2, 3], 0, 1.0, &mut g);
+            g
+        };
+        let libre = rellenar(true);
+        assert_eq!(libre.cuenta_liquido[1], 2.0, "libre, también el que pasa por debajo");
+        let envuelta = rellenar(false);
+        assert_eq!(
+            envuelta.cuenta_liquido,
+            [1.0, 1.0, 0.0, 0.0],
+            "envuelta, solo la suya y su enlace"
+        );
+        assert_eq!(envuelta.tubos[0], [0.0, 0.0, 2.5, 0.0]);
     }
 }
