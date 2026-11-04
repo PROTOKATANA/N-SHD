@@ -17,8 +17,9 @@
 namespace shd :: nodos {
 
 // La pintura de la gota : el contorno donde la masa del campo pasa de un umbral, el líquido
-// de los canales hasta donde llega, y el calor en las bandas del vórtice. Lee lo que dejan
-// el campo (CampoGota) y los canales (CanalesGota)
+// de los canales hasta donde llega, y el calor en las bandas del vórtice, sin los trozos
+// sueltos. Lee lo que dejan el campo (CampoGota), los canales (CanalesGota) y los trozos
+// sueltos (SueltosGota)
 
 class PinturaGota {
 
@@ -35,6 +36,8 @@ public:
 		Diligent :: IBuffer * cerca ;
 
 		Diligent :: IBuffer * calor ;
+
+		Diligent :: IBuffer * unido ;
 
 	} ;
 

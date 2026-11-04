@@ -131,7 +131,9 @@ mínimos y medianas.
 | `gota_particulas` | El PBF: barrer, medir, predecir, vecinas, presión y velocidad | el cbuffer | estado, calor (al sembrar), medida, vecinas |
 | `gota_campo` | El calor de cada partícula y su masa, calor y velocidad en el campo | partículas | campo, calor |
 | `gota_canales` | El fluido de los canales | campo | máscara, alcance, cerca, calor |
-| `gota_pintura` | El contorno, los canales y las bandas | campo y canales | la imagen |
+| `gota_liquido_hlsl` | Dónde hay líquido: el contorno de la gota y el de los canales, la misma cuenta para la pintura y los trozos sueltos | — | — |
+| `gota_sueltos` | Qué líquido está unido al cuerpo de la gota | campo y canales | unido |
+| `gota_pintura` | El contorno, los canales y las bandas, sin los trozos sueltos | campo, canales y unido | la imagen |
 | `pasada_gota` | Las une: el cbuffer, el orden y las transiciones | — | — |
 | `comun/bloque_hlsl` | Iterar un estencil en bloques | — | — |
 | `gota/` (Rust) | `contactos`, `retraso` y `cercano`; `EstadoGota` los une | — | — |
@@ -163,9 +165,52 @@ mínimos y medianas.
   `head` y no el del compilador: decía que compilaban cuando fallaban por las rutas. Repetido con
   la línea de órdenes completa.
 
+## Después: sin trozos sueltos (2026-11-03 y 04)
+
+Un cambio que no es una optimización (cambia lo que se ve), con RAYO aplicado a lo que cuesta. Banco del visor (`SHD_BANCO_GPU`, guion `arrastre`, 1280 × 800), tandas alternas.
+
+### Sin trozos sueltos (`gota_sueltos`)
+
+- **Qué**: solo se pinta el líquido unido al cuerpo de la gota. `marcar` mira en la rejilla de los
+  canales qué celdas tienen líquido (con la cuenta de la pintura, `gota_liquido_hlsl.h`) y `unir`
+  lo une desde el centro en un solo grupo, con una celda por bit (§2, conjunto de bits) y el relleno
+  de tramos de Kogge-Stone (§9, instrucciones de bits): 0,031 ms.
+- **Coste**: la escena de la gota, de 0,759 a 0,940 ms (simular 0,637 → 0,810; pintar 0,122 → 0,130).
+- **Pintar, la vía rápida** (§17, haz rápido el caso común): casi siempre todo el líquido de
+  alrededor es del cuerpo, o no hay; entonces no se pesan 16 celdas. De 0,172 a 0,130 ms.
+- **`marcar`, los cuatro puntos solo donde el centro no tiene líquido** (§7): de 0,161 a 0,139 ms.
+- **Prueba**: los 811 fotogramas de los cuatro guiones, idénticos byte a byte a la versión sin
+  ninguna de las dos (pintado lento, cinco puntos en cada celda); el oro, idéntico a antes de los
+  trozos. Trozos, contados con la gota pintada en blanco (con colores, el contador ve trozos falsos
+  en los anillos de los huecos y en las líneas de las bandas): de 10 fotogramas a 0; quedan 3 marcas
+  que son el borde suavizado sobre el canto de un nodo, y que con colores no se ven.
+
+### Descartado (con su medida)
+
+- **Saltar en `marcar` también lo lejano, con una cota a ojo** (poca masa y sin alcance en el
+  centro): 0,118 ms, pero cambiaba 7 píxeles en 2 de 811 fotogramas. No es una optimización.
+- **La misma, con cotas exactas** (la mayor masa de las 3 × 3 celdas que se mezclan, y ninguna
+  celda de canal alcanzada en las que lee `canal_en`): el mismo resultado, pero 0,144 ms frente a
+  0,139: leer las cotas cuesta más que los cuatro puntos que ahorra.
+
+### Errores míos por el camino
+
+- La primera máscara añadía un borde de una celda alrededor del cuerpo para no cortar su
+  contorno, y dejaba motas tenues y una línea de 1 px junto a él. Se vio pintando lo cortado en
+  magenta. Ahora cada píxel decide por las celdas de líquido de alrededor.
+- Mirar cuatro puntos por celda también para unir juntaba al cuerpo un punto a 1-2 px por el hueco:
+  para unir cuenta solo el centro.
+- La primera vía rápida del pintado devolvía 1 donde la cuenta entera devuelve 0 (las únicas
+  celdas de líquido, en las esquinas, pesan menos de 1e-5): un píxel distinto en 811 fotogramas. Se
+  vio al verificar con RAYO, comparando con la versión sin atajos.
+
 ## Lo que pide una decisión
 
 1. **El reparto del líquido en la CPU** (6): de 26 a 63 µs más por fotograma a cambio de hasta
    4,2 ms de GPU. Si pesara, se puede tener una celda algo más grande (con celdas 3 veces menores que
    antes, 0,124 ms de GPU y menos CPU).
 2. **El rojo mínimo** con 12 clics seguidos sigue entre el 2 y el 3 %, antes y después.
+3. **Un banco de regresión de los trozos**: el contador y los guiones que los cuentan no están en el
+   repositorio, y la puerta (`scripts/check.ps1`) no corre la GPU. Llevarlos al visor (una opción
+   que cuente los trozos de la gota en blanco y falle si hay alguno) los vigilaría, a cambio de más
+   código de pruebas en el visor.
