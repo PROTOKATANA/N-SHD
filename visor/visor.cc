@@ -17,7 +17,8 @@
 // nodos solo, para ver los choques sin ratón ; con SHD_NODOS_GUION=arrastre, el
 // vórtice va de lado a lado cada vez más rápido; con SHD_NODOS_GUION=pared, atraviesa una
 // pared de nodos y se aleja; con SHD_NODOS_GUION=cerca, se acerca a un enlace ajeno hasta
-// cruzarlo.
+// cruzarlo. Con SHD_GOTA_ENVUELTA, la gota va envuelta en un anillo del líquido de los enlaces
+// que sigue su forma (sin vórtice libre), como en CORTEX.
 //
 // El banco, en los nodos : con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y cada tramo
 // de dentro (banco_visor.h); con SHD_NODOS_MALLA=<c>x<f>, una malla de nodos en vez de los
@@ -504,15 +505,31 @@ public:
 
 		}
 
-		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>()) ;
-
 		const char * fps = std :: getenv("SHD_NODOS_FPS") ;
 
 		shd :: Reloj reloj = std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / (fps ? std :: atof(fps) : 60.0)) : shd :: reloj_monotono() ;
 
-		if (gota) { pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj))) ; }
+		if (gota) {
 
-		else { pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: move(reloj) , shd :: nodos :: fabrica_fluido_stam())) ; }
+			auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
+
+			// envuelta, el líquido lee de la gota lo lejos que queda : su anillo la sigue
+
+			const bool envuelta = std :: getenv("SHD_GOTA_ENVUELTA") != nullptr ;
+
+			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(true , envuelta ? la_gota.get() : nullptr)) ;
+
+			pasadas_.push_back(std :: move(la_gota)) ;
+
+		}
+
+		else {
+
+			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>()) ;
+
+			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: move(reloj) , shd :: nodos :: fabrica_fluido_stam())) ;
+
+		}
 
 		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
 
@@ -572,7 +589,7 @@ public:
 
 		escena_.vortice = 1 ;
 
-		escena_.vortice_libre = gota_ ;
+		escena_.vortice_libre = gota_ && !std :: getenv("SHD_GOTA_ENVUELTA") ;
 
 		escena_.ancho = ancho ;
 

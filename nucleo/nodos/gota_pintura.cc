@@ -4,6 +4,8 @@
 
 # include "computo.h"
 
+# include "gota_liquido_hlsl.h"
+
 # include "pipeline_comun.h"
 
 using namespace Diligent ;
@@ -26,17 +28,55 @@ void main(in uint vid : SV_VertexID, out Salida o) {
 
 // La masa de una partícula en el campo, si estuvieran repartidas en el disco : el
 // contorno va bastante por debajo, para que un hueco entre partículas no se vea. El
-// calor, por bandas como en el vórtice
+// calor, por bandas como en el vórtice. Dónde hay líquido, en gota_liquido_hlsl.h
 
 constexpr const char * pintar_ps = R"(
-StructuredBuffer<uint> campo;
-StructuredBuffer<uint> canal_masc;
-StructuredBuffer<float2> canal_alc;
-StructuredBuffer<float> canal_cer;
-MUESTRA_C(cer_en, canal_cer, float)
-StructuredBuffer<float> canal_cal;
+StructuredBuffer<uint> unido;
 
 struct Entrada { float4 Position : SV_POSITION; float2 Mundo : TEXCOORD0; };
+
+// Lo unido al cuerpo de la gota en un punto (SueltosGota) : entre las celdas de líquido de una
+// vecindad de 4 × 4, pesadas por la distancia, cuánto son del cuerpo. En el cuerpo es 1, en un
+// trozo suelto 0, y donde no hay ninguna también 0 : lo que queda más cerca de un trozo que del
+// cuerpo no se pinta. Los cuatro bits de las columnas x0 a x0 + 3 de la fila y, en la mitad
+// `mitad` (0 lo unido, 1 el líquido); fuera de la rejilla, 0
+uint cuatro_bits(int x0, int y, uint mitad) {
+  uint base = mitad * M * (M / 32u) + uint(clamp(y, 0, int(M) - 1)) * (M / 32u);
+  uint s = 0u;
+  [unroll] for (int x = 0; x < 4; ++x) {
+    int c = x0 + x;
+    uint q = uint(clamp(c, 0, int(M) - 1));
+    uint b = (unido[base + q / 32u] >> (q & 31u)) & 1u;
+    s |= (c >= 0 && c < int(M) ? b : 0u) << uint(x);
+  }
+  return y >= 0 && y < int(M) ? s : 0u;
+}
+float unido_en(float2 g) {
+  int2 a = int2(floor(g));
+  // la vecindad en 16 bits : dónde hay líquido y qué es del cuerpo
+  uint liq = 0u, cuerpo = 0u;
+  [unroll] for (int y = 0; y < 4; ++y) {
+    liq |= cuatro_bits(a.x - 1, a.y - 1 + y, 1u) << uint(4 * y);
+    cuerpo |= cuatro_bits(a.x - 1, a.y - 1 + y, 0u) << uint(4 * y);
+  }
+  // Casi siempre : no hay líquido, o todo el de alrededor es del cuerpo y alguno está fuera de
+  // las cuatro esquinas (cada celda de fuera pesa al menos 5,5e-4 : pasa del tope de 1e-5 de la
+  // cuenta entera). Da lo mismo que la cuenta entera; medido (banco del visor, arrastre a
+  // 1280 × 800) : el pintado, de 0,172 a 0,129 ms
+  const uint ESQUINAS = 0x9009u;
+  if (liq == 0u) return 0.0;
+  if ((liq & ~cuerpo) == 0u && (liq & ~ESQUINAS) != 0u) return 1.0;
+  float s = 0.0;
+  float sw = 0.0;
+  [unroll] for (int k = 0; k < 16; ++k) {
+    if (((liq >> uint(k)) & 1u) == 0u) continue;
+    float2 e = g - float2(a + int2(k % 4 - 1, k / 4 - 1));
+    float w = exp(-dot(e, e) * 1.5);
+    s += w * float((cuerpo >> uint(k)) & 1u);
+    sw += w;
+  }
+  return sw > 1e-5 ? s / sw : 0.0;
+}
 
 static const float3 GAMA[8] = {
   float3(0.03, 0.07, 0.25), float3(0.07, 0.22, 0.72), float3(0.12, 0.56, 0.91), float3(0.20, 0.82, 0.94),
@@ -47,54 +87,6 @@ float3 gama(float t) {
   float x = saturate(t) * 7.0;
   int k = min(int(x), 6);
   return lerp(GAMA[k], GAMA[k + 1], x - float(k));
-}
-
-float2 en(int2 c) {
-  if (any(c < 0) || any(c >= int(G))) return float2(0.0, 0.0);
-  uint k = (uint(c.y) * G + uint(c.x)) * 2u;
-  return float2(campo[k], campo[k + 1u]);
-}
-
-// el campo en un punto (en celdas), entre las cuatro celdas que lo rodean
-float2 campo_en(float2 g) {
-  float2 q = g - 0.5;
-  int2 a = int2(floor(q));
-  float2 f = q - float2(a);
-  return lerp(lerp(en(a), en(a + int2(1, 0)), f.x), lerp(en(a + int2(0, 1)), en(a + int2(1, 1)), f.x), f.y);
-}
-
-float2 celda_de(float2 r) { return (r + VISTA) / (2.0 * VISTA) * float(G); }
-
-// El alcance y el calor de los canales con las celdas de líquido de una vecindad de 4 × 4,
-// pesadas por la distancia : con solo las cuatro de alrededor, el borde del canal seguía la
-// rejilla, en escalera, en vez de la forma del enlace
-float3 canal_en(float2 g) {
-  g = clamp(g, 1.0, float(M) - 2.001);
-  int2 a = int2(floor(g));
-  float3 s = float3(0.0, 0.0, 0.0);
-  float sw = 0.0;
-  [unroll] for (int y = -1; y <= 2; ++y) {
-    [unroll] for (int x = -1; x <= 2; ++x) {
-      int i = ic(a + int2(x, y));
-      if (canal_masc[i] == 0u) continue;
-      float2 e = g - float2(a + int2(x, y));
-      float w = exp(-dot(e, e) * 1.5);
-      s += float3(canal_alc[i], canal_cal[i]) * w;
-      sw += w;
-    }
-  }
-  return sw > 1e-5 ? s / sw : float3(1e3, 0.0, 0.0);
-}
-
-// Lo que hay de líquido alrededor, a unas celdas : un grupito de partículas suelto, o un
-// bulto del borde, es más pequeño que eso, y así no se dibuja como una cuenta aparte
-float masa_grande(float2 g) {
-  float s = 0.0;
-  [unroll] for (int k = 0; k < 8; ++k) {
-    float a = float(k) * 0.7853982;
-    s += campo_en(g + float2(cos(a), sin(a)) * GRUMO).x;
-  }
-  return s / 8.0;
 }
 
 // lo azul que es un calor : de 1 en los azules a 0 desde el cian
@@ -113,32 +105,18 @@ float3 bandas(float t) {
 float4 main(in Entrada i) : SV_TARGET {
   float2 p = (i.Mundo - centro.xy) / centro.z;
   float2 v = campo_en(celda_de(p));
-  // celdas por radio, y las partículas por celda
-  float celdas = float(G) / (2.0 * VISTA);
-  float lleno = float(N) / PI / (celdas * celdas) * PI * float(ALCANCE * ALCANCE) / 3.0 * 256.0;
-  float umbral = 0.4 * lleno;
-  float aa = max(fwidth(v.x), 1.0);
-  float gota = smoothstep(umbral - aa, umbral + aa, v.x);
-  // donde no llega la gota, lo de alrededor no cambia nada (0 por lo que sea es 0)
-  if (gota > 0.0) gota *= smoothstep(0.12 * lleno, 0.2 * lleno, masa_grande(celda_de(p)));
-  // y el líquido de los canales, con sus paredes nítidas : la forma elástica de los
-  // enlaces, y sin cubrir los nodos
-  float2 gc = (p + VISTA) / CELDA_C - 0.5;
-  float pixel = max(fwidth(p.x), fwidth(p.y));
-  // dentro de la forma y hasta donde llega, con el frente redondeado como un menisco
+  float lleno = lleno_campo();
+  float gota = forma_gota(p, v, max(fwidth(v.x), 1.0));
+  // y el líquido de los canales
+  float2 gc = celda_canal(p);
   float3 cc = canal_en(gc);
   float2 alc = cc.xy;
-  // sin líquido alrededor (alcance de 1e3), el frente queda a más de 998 radios : el canal es
-  // 0 exacto, y ni la silueta de los enlaces ni los nodos hacen falta. Es casi toda la vista
-  float canal = 0.0;
-  if (alc.x < 999.0) {
-    float pared = embudo(p, cer_en(gc));
-    float forma = -smin_tubo(LLEGA - alc.x, -pared, FRENTE);
-    canal = 1.0 - smoothstep(-pixel, pixel, forma);
-    for (uint o = 0u; o < uint(inercia.w); ++o) canal *= smoothstep(0.0, 1.5 * pixel, length(p - obstaculos[o].xy) - obstaculos[o].z);
-  }
-  float dentro = max(gota, canal);
+  float canal = forma_canal(p, gc, alc.x, max(fwidth(p.x), fwidth(p.y)));
   // solo el líquido : lo que no es líquido no se pinta
+  float dentro = max(gota, canal);
+  if (dentro <= 0.0) discard;
+  // y sin los trozos sueltos : ni un grumo
+  dentro *= smoothstep(0.25, 0.75, unido_en(gc));
   if (dentro <= 0.0) discard;
   // en el canal, el color con que salió de la boca, que se enfría al alejarse, removido por
   // el flujo de los canales
@@ -176,7 +154,7 @@ bool PinturaGota :: crear(
 
 	RefCntAutoPtr<IShader> vs = gpu_compilar(gpu , { SHADER_TYPE_VERTEX , "Nodos gota VS" , hlsl + pintar_vs }) ;
 
-	RefCntAutoPtr<IShader> ps = gpu_compilar(gpu , { SHADER_TYPE_PIXEL , "Nodos gota PS" , hlsl + pintar_ps }) ;
+	RefCntAutoPtr<IShader> ps = gpu_compilar(gpu , { SHADER_TYPE_PIXEL , "Nodos gota PS" , hlsl + liquido_gota_hlsl + pintar_ps }) ;
 
 	if (!vs || !ps) { return gpu_fallo(error , "No se pudieron compilar los shaders de la gota") ; }
 
@@ -229,6 +207,8 @@ bool PinturaGota :: crear(
 	atar("canal_masc" , lecturas.mascara) ;
 
 	atar("canal_cal" , lecturas.calor) ;
+
+	atar("unido" , lecturas.unido) ;
 
 	return true ;
 

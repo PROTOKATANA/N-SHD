@@ -42,7 +42,10 @@ mod ffi {
         ancho: u32,
         alto: u32,
         /// El vórtice es un líquido suelto (`PasadaGota`): su forma cambia, así que en el líquido de
-        /// los enlaces su gota no asoma alrededor, o se vería un círculo fijo debajo.
+        /// los enlaces su gota no asoma alrededor, o se vería un círculo fijo debajo. Si no, la gota
+        /// va envuelta: el líquido de los enlaces le pinta un anillo que sigue su forma (con la
+        /// distancia de la gota, `DistanciaGota`), sus canales son solo sus enlaces y choca con la
+        /// vista a lo que asoma el anillo.
         vortice_libre: bool,
     }
 
@@ -67,7 +70,7 @@ mod ffi {
         rejilla: [f32; 4],
         /// x, y, radio que se ve (mundo), lo que se hunde su gota (mundo).
         nodos: [[f32; 4]; 256],
-        /// rgba.
+        /// rgb, y en a si su gota es el anillo de la gota envuelta (1 o 0).
         colores: [[f32; 4]; 256],
         /// Dos enlaces por elemento.
         aristas: [[u32; 4]; 256],
@@ -75,6 +78,9 @@ mod ffi {
         celdas: [[u32; 4]; 256],
         /// Dos índices de 16 bits por uint: nodo i, o enlace nodos + e.
         indices: [[u32; 4]; 3068],
+        /// La gota envuelta: el centro (x, y) y el radio (mundo) de su rejilla, y lo que asoma su
+        /// anillo alrededor de ella (radios).
+        anillo: [f32; 4],
     }
 
     /// El cbuffer «Vortice»: lo leen su forzamiento en el solver y su pintado.
@@ -259,7 +265,7 @@ pub use ffi::{
 const _: () = assert!(size_of::<CamaraGpu>() == 48);
 const _: () = assert!(size_of::<VorticeGpu>() == 96);
 const _: () = assert!(size_of::<GotaGpu>() == 288 + 16 + 64 + 16 * 2 + 12 * 16 + 16 * 16 + 4 * 16 * 2);
-const _: () = assert!(size_of::<LiquidoGpu>() == 48 + 256 * 16 * 3 + 1024 * 4 + 24544 * 2);
+const _: () = assert!(size_of::<LiquidoGpu>() == 48 + 256 * 16 * 3 + 1024 * 4 + 24544 * 2 + 16);
 const _: () = assert!(size_of::<LiquidoGpu>() <= 65536, "un cbuffer mide como mucho 64 KiB");
 
 impl LiquidoGpu {
@@ -274,6 +280,7 @@ impl LiquidoGpu {
             aristas: [[0; 4]; 256],
             celdas: [[0; 4]; 256],
             indices: [[0; 4]; 3068],
+            anillo: [0.0; 4],
         })
     }
 }

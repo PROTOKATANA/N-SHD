@@ -4,6 +4,8 @@
 
 # include <string>
 
+# include "distancia_gota.h"
+
 # include "pasada.h"
 
 # include "reloj.h"
@@ -22,7 +24,7 @@ namespace shd :: nodos {
 // y se anima solo. Va en piezas (gota_particulas, gota_campo, gota_canales y
 // gota_pintura) : la pasada las une
 
-class PasadaGota : public Pasada {
+class PasadaGota : public Pasada , public DistanciaGota {
 
 public:
 
@@ -41,6 +43,8 @@ public:
 	const char * nombre() const override { return "gota" ; }
 
 	std :: vector<std :: string> tramos() const override ;
+
+	Diligent :: IBuffer * distancia_gota() const override ;
 
 	void medir(Medidor * banco , std :: size_t primera) override { banco_ = banco ; primera_ = primera ; }
 

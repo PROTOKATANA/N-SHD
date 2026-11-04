@@ -52,7 +52,10 @@ public:
 
 	// Antes de pedir el turno a la GPU : pipelines (una vez por dispositivo),
 	// buffers y cálculos de CPU. Puede ajustar la cámara compartida (el
-	// líquido pone ahí su caja)
+	// líquido pone ahí su caja). Quien integra puede preparar y no seguir
+	// (sin imagen libre, abandona el fotograma) : aquí no avanza nada que
+	// dependa del tiempo ni de lo que se movió desde el fotograma anterior.
+	// Eso, al subir
 
 	virtual bool preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu & camara , std :: string & error) = 0 ;
 

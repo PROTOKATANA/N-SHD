@@ -34,6 +34,7 @@ add_library(shd_nucleo STATIC
   "nodos/gota_comun.cc"
   "nodos/gota_particulas.cc"
   "nodos/gota_pintura.cc"
+  "nodos/gota_sueltos.cc"
   "nodos/pasada_gota.cc"
   "nodos/pasada_liquido.cc"
   "nodos/pasada_vortice.cc"

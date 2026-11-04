@@ -88,8 +88,8 @@ float2 barrido_de(uint i) { float4 b = barrido[i >> 1]; return (i & 1u) != 0u ? 
 
 // el fluido de los canales
 static const float FRENO_C = 1.5;   // 1/s : lo que se frena el fluido de los canales
-static const float LLEGA = 0.85;     // radios : hasta dónde llega el líquido por los canales, con el menisco
-static const float FRENTE = 0.3;     // radios : lo que se redondea el frente del líquido, como un menisco
+static const float LLEGA = 0.255;    // radios : hasta dónde llega el líquido por los canales, con el menisco (0,85, un 70 % más corto : la gota, una esfera con puntas cortas)
+static const float FRENTE = 0.09;    // radios : lo que se redondea el frente del líquido, como un menisco (0,3, en proporción al alcance)
 static const float GRUMO = 5.0;      // celdas del campo : lo que mide lo más pequeño que se dibuja suelto
 static const float BORDE_GOTA = 0.3;  // lo que cubre la gota en su borde visible : de ahí sale el color de los canales
 

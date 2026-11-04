@@ -16,14 +16,17 @@
 
 # include "gota_pintura.h"
 
+# include "gota_sueltos.h"
+
 # include "pipeline_comun.h"
 
 using namespace Diligent ;
 
 namespace shd :: nodos {
 
-// Las piezas de la gota en un dispositivo : las partículas, el campo, los canales y la
-// pintura. La pasada solo las une : les da los buffers que leen y las lanza por turno
+// Las piezas de la gota en un dispositivo : las partículas, el campo, los canales, los trozos
+// sueltos y la pintura. La pasada solo las une : les da los buffers que leen y las lanza por
+// turno
 
 struct PasadaGota :: Recursos {
 
@@ -36,6 +39,8 @@ struct PasadaGota :: Recursos {
 	CampoGota campo ;
 
 	CanalesGota canales ;
+
+	SueltosGota sueltos ;
 
 	PinturaGota pintura ;
 
@@ -69,7 +74,11 @@ struct PasadaGota :: Recursos {
 
 		if (!canales.crear(gpu , uniforme , hlsl , campo.campo() , campo.velocidad() , error)) { return false ; }
 
-		const PinturaGota :: Lecturas lecturas = { campo.campo() , canales.mascara() , canales.alcance() , canales.cerca() , canales.calor() } ;
+		const SueltosGota :: Lecturas de_sueltos = { campo.campo() , canales.mascara() , canales.alcance() , canales.cerca() , canales.calor() } ;
+
+		if (!sueltos.crear(gpu , uniforme , hlsl , de_sueltos , error)) { return false ; }
+
+		const PinturaGota :: Lecturas lecturas = { campo.campo() , canales.mascara() , canales.alcance() , canales.cerca() , canales.calor() , sueltos.unido() } ;
 
 		return pintura.crear(gpu , camara , uniforme , hlsl , lecturas , error) ;
 
@@ -81,7 +90,11 @@ struct PasadaGota :: Recursos {
 
 		campo.avanzar(ctx , particulas.actual() , banco , primera + ParticulasGota :: tramos().size()) ;
 
-		canales.avanzar(ctx , banco , primera + ParticulasGota :: tramos().size() + CampoGota :: tramos().size()) ;
+		const std :: size_t de_canales = primera + ParticulasGota :: tramos().size() + CampoGota :: tramos().size() ;
+
+		canales.avanzar(ctx , banco , de_canales) ;
+
+		sueltos.avanzar(ctx , banco , de_canales + CanalesGota :: tramos().size()) ;
 
 		// listo para leer antes de fijar el objetivo : dentro del render pass ya no
 		// se puede cambiar de estado
@@ -96,11 +109,13 @@ struct PasadaGota :: Recursos {
 
 			{ canales.cerca() , RESOURCE_STATE_UNKNOWN , RESOURCE_STATE_SHADER_RESOURCE , STATE_TRANSITION_FLAG_UPDATE_STATE } ,
 
-			{ canales.calor() , RESOURCE_STATE_UNKNOWN , RESOURCE_STATE_SHADER_RESOURCE , STATE_TRANSITION_FLAG_UPDATE_STATE }
+			{ canales.calor() , RESOURCE_STATE_UNKNOWN , RESOURCE_STATE_SHADER_RESOURCE , STATE_TRANSITION_FLAG_UPDATE_STATE } ,
+
+			{ sueltos.unido() , RESOURCE_STATE_UNKNOWN , RESOURCE_STATE_SHADER_RESOURCE , STATE_TRANSITION_FLAG_UPDATE_STATE }
 
 		} ;
 
-		ctx->TransitionResourceStates(5 , listos) ;
+		ctx->TransitionResourceStates(6 , listos) ;
 
 	}
 
@@ -110,23 +125,25 @@ PasadaGota :: PasadaGota(Reloj reloj) : reloj_(std :: move(reloj)) , estado_(est
 
 PasadaGota :: ~PasadaGota() = default ;
 
+IBuffer * PasadaGota :: distancia_gota() const { return recursos_ ? recursos_->canales.cerca() : nullptr ; }
+
 std :: vector<std :: string> PasadaGota :: tramos() const {
 
 	std :: vector<std :: string> todos = ParticulasGota :: tramos() ;
 
-	for (const auto & lista : { CampoGota :: tramos() , CanalesGota :: tramos() }) { todos.insert(todos.end() , lista.begin() , lista.end()) ; }
+	for (const auto & lista : { CampoGota :: tramos() , CanalesGota :: tramos() , SueltosGota :: tramos() }) { todos.insert(todos.end() , lista.begin() , lista.end()) ; }
 
 	return todos ;
 
 }
 
+// Sin avanzar nada : quien integra puede preparar y no subir (sin imagen libre, abandona el
+// fotograma), y entonces la gota perdía ese tiempo y lo que se movieron los nodos. El estado
+// avanza al subir
+
 bool PasadaGota :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu & , std :: string & error) {
 
-	const rust :: Slice<const Nodo> nodos(f.nodos->data() , f.nodos->size()) ;
-
-	const rust :: Slice<const std :: uint32_t> aristas(f.aristas->data() , f.aristas->size()) ;
-
-	hay_ = f.escena.vortice && estado_->rellenar(f.escena , nodos , aristas , reloj_() , datos_) ;
+	hay_ = f.escena.vortice != 0 ;
 
 	if (!hay_) { return true ; }
 
@@ -148,7 +165,15 @@ bool PasadaGota :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu & 
 
 }
 
-void PasadaGota :: subir(IDeviceContext * ctx , const Fotograma &) {
+void PasadaGota :: subir(IDeviceContext * ctx , const Fotograma & f) {
+
+	if (!hay_) { return ; }
+
+	const rust :: Slice<const Nodo> nodos(f.nodos->data() , f.nodos->size()) ;
+
+	const rust :: Slice<const std :: uint32_t> aristas(f.aristas->data() , f.aristas->size()) ;
+
+	hay_ = estado_->rellenar(f.escena , nodos , aristas , reloj_() , datos_) ;
 
 	if (!hay_) { return ; }
 
