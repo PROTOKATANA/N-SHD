@@ -16,3 +16,6 @@
   Lo suelto sigue en la simulación y se ve otra vez al volver. En los cuatro guiones del visor, de 10 fotogramas con
   trozos a ninguno (el contador aún marca 3, el borde suavizado del líquido sobre el canto de un nodo); la gota sin
   trozos, idéntica byte a byte. Cuesta 0,18 ms en la GPU a 1280 × 800 (la escena de la gota, de 0,76 a 0,94).
+- `Pasada :: preparar` no avanza nada que dependa del tiempo: la gota y el vórtice avanzan al subir. Un integrador que
+  prepara y abandona el fotograma (sin imagen libre) les quitaba tiempo: en CORTEX, con los nodos moviéndose, la gota
+  simulaba 41-90 subpasos por segundo de 120. La misma imagen en el visor.

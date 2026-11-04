@@ -203,6 +203,16 @@ Un cambio que no es una optimización (cambia lo que se ve), con RAYO aplicado a
 - La primera vía rápida del pintado devolvía 1 donde la cuenta entera devuelve 0 (las únicas
   celdas de líquido, en las esquinas, pesan menos de 1e-5): un píxel distinto en 811 fotogramas. Se
   vio al verificar con RAYO, comparando con la versión sin atajos.
+## Después: `preparar` sin avanzar (2026-11-04)
+
+Un arreglo, no una optimización, con RAYO aplicado a lo que mide.
+
+- **Qué**: quien integra puede preparar y abandonar el fotograma (sin imagen libre). La gota y el
+  vórtice avanzaban su reloj y lo que se movieron los nodos en `preparar`: ese tiempo se perdía.
+  Ahora avanza al subir, y el contrato lo dice en `pasada.h`.
+- **Medida** (CORTEX, release, con la física moviendo los nodos): se abandonan 126 de 217 fotogramas
+  preparados en 2 s; la gota simulaba 41-90 subpasos por segundo, y ahora 119-120, los de siempre.
+- **Prueba**: el oro, idéntico (en el visor nada se abandona).
 
 ## Lo que pide una decisión
 

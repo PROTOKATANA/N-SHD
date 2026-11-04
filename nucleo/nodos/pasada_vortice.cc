@@ -283,11 +283,11 @@ PasadaVortice :: PasadaVortice(Reloj reloj , FabricaFluido fabrica , bool diagno
 
 PasadaVortice :: ~PasadaVortice() = default ;
 
+// Sin avanzar nada, como la gota : el reloj y las pulsaciones avanzan al subir
+
 bool PasadaVortice :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu & , std :: string & error) {
 
-	const rust :: Slice<const Nodo> nodos(f.nodos->data() , f.nodos->size()) ;
-
-	hay_ = f.escena.vortice && estado_->rellenar(f.escena , nodos , reloj_() , fotograma_) ;
+	hay_ = f.escena.vortice != 0 ;
 
 	if (!hay_) { return true ; }
 
@@ -398,7 +398,13 @@ void PasadaVortice :: medir(Medidor * banco , std :: size_t primera) {
 
 }
 
-void PasadaVortice :: subir(IDeviceContext * ctx , const Fotograma &) {
+void PasadaVortice :: subir(IDeviceContext * ctx , const Fotograma & f) {
+
+	if (!hay_) { return ; }
+
+	const rust :: Slice<const Nodo> nodos(f.nodos->data() , f.nodos->size()) ;
+
+	hay_ = estado_->rellenar(f.escena , nodos , reloj_() , fotograma_) ;
 
 	if (!hay_) { return ; }
 
