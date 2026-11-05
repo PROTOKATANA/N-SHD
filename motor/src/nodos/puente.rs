@@ -4,6 +4,7 @@
 //! el hilo que pinta.
 
 use super::camara::camara_de;
+use super::choque::{separacion_nodos, separar_nodos};
 use super::gota::{EstadoGota, desc_gota, estado_gota};
 use super::liquido::rellenar_liquido_en_camara as rellenar_liquido;
 
@@ -165,6 +166,13 @@ mod ffi {
         ) -> bool;
 
         fn desc_gota() -> DescGota;
+
+        /// Aparta los nodos que se tocan (`choque`): el vórtice no choca. `arrastrado`, el índice + 1
+        /// del que lleva el cursor; 0, ninguno. True si quedaron sin tocarse.
+        fn separar_nodos(escena: &Escena, nodos: &mut [Nodo], arrastrado: u32) -> bool;
+
+        /// Lo que se separan dos nodos: la suma de sus radios que se ven por esto.
+        fn separacion_nodos() -> f32;
     }
 }
 

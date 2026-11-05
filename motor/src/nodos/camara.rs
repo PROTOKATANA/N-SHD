@@ -15,6 +15,24 @@ pub fn camara_de(escena: &Escena, ancho: u32, alto: u32) -> CamaraGpu {
     }
 }
 
+/// Los bordes de lo que se ve, en mundo (x0, y0, x1, y1): la vista de ancho × alto centrada en la
+/// escena. Solo con tamaño y escala: si no, `None`.
+pub fn vista(escena: &Escena) -> Option<[f32; 4]> {
+    if escena.ancho == 0 || escena.alto == 0 || escena.escala <= 0.0 {
+        return None;
+    }
+    let (medio_x, medio_y) = (
+        escena.ancho as f32 * 0.5 / escena.escala,
+        escena.alto as f32 * 0.5 / escena.escala,
+    );
+    Some([
+        escena.centro_x - medio_x,
+        escena.centro_y - medio_y,
+        escena.centro_x + medio_x,
+        escena.centro_y + medio_y,
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

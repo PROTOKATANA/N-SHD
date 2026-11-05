@@ -138,6 +138,7 @@ mínimos y medianas.
 | `comun/bloque_hlsl` | Iterar un estencil en bloques (los canales) | — | — |
 | `gota/` (Rust) | `contactos`, `retraso` y `cercano`; `EstadoGota` los une | — | — |
 | `liquido/rejilla` (Rust) | La rejilla de culling del líquido | — | — |
+| `choque` (Rust) | Que los nodos no se toquen (el vórtice no choca) | los nodos | los nodos |
 
 - Ninguna pieza conoce a otra: la pasada les da los buffers que leen (`Lecturas`), y cada una dice
   los que escribe. Interfaces abstractas solo donde hay algo que sustituir (el fluido del vórtice ya
@@ -293,6 +294,19 @@ existen.
 - **Prueba**: con el vórtice a 0 en el visor (un cambio local, fuera del commit), de 1 color a 2918
   en cada fotograma, con los nueve nodos y sus enlaces. Con vórtice, los 811 fotogramas idénticos.
   La puerta no corre la GPU, así que esto no lo vigila ninguna prueba.
+
+## Después: los nodos no se tocan (2026-11-05)
+
+- **Qué**: `separar_nodos` (`choque`), el choque del antiguo motor de fuerzas de CORTEX: cada par de
+  nodos más cerca que la suma de sus radios por 1,5 se aparta hasta esa distancia, en hasta 8 pasadas
+  por llamada. El vórtice no choca. Dos cambios sobre el de CORTEX: contra un nodo que el borde acaba
+  de devolver cede el otro entero (antes, a medias, y tras 8 pasadas seguían a 29,92 de 30), y una
+  holgura de una milésima, porque apartar justo hasta tocarse dejaba redondeos que no acababan nunca.
+- **Medida** (CPU, release, malla de 16 × 16 con el vórtice): 21 µs por fotograma sin nadie
+  tocándose, y 168 µs (p95 200) con un nodo arrastrado encima de otro. Con los 9 nodos del menú, nada.
+- **Prueba**: los guiones `1`, `arrastre` y `cerca`, idénticos byte a byte: ningún par se toca. En
+  `pared` los tres nodos se tocaban; ahora la pared se coloca a 48, tan junta como deja el choque, y
+  sus gotas siguen uniéndose. 9 pruebas de Rust nuevas.
 
 ## Lo que pide una decisión
 

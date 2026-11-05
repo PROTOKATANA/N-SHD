@@ -1,6 +1,7 @@
 //! Con qué choca el líquido y con qué fuerza: los nodos más cercanos, los bordes de la vista y lo que
 //! entra en el círculo del vórtice, recordado de un fotograma al siguiente.
 
+use super::super::camara::vista;
 use super::super::liquido::{ANILLO, FORMA as LIQUIDO};
 use super::super::puente::{Escena, GotaGpu, Nodo};
 use super::{FORMA, MARGEN};
@@ -16,21 +17,6 @@ const SIN_BORDE: f32 = 1e3;
 
 /// radios: lo más que barre un nodo en un fotograma. Si salta más, se recoloca, no empuja.
 const BARRIDO_MAX: f32 = 1.5;
-
-/// Los bordes de lo que se ve, en mundo (x0, y0, x1, y1): la vista de ancho × alto centrada en la
-/// escena. Solo con tamaño y escala.
-fn vista(escena: &Escena) -> [f32; 4] {
-    let (medio_x, medio_y) = (
-        escena.ancho as f32 * 0.5 / escena.escala,
-        escena.alto as f32 * 0.5 / escena.escala,
-    );
-    [
-        escena.centro_x - medio_x,
-        escena.centro_y - medio_y,
-        escena.centro_x + medio_x,
-        escena.centro_y + medio_y,
-    ]
-}
 
 /// Lo que se recuerda de un fotograma al siguiente: cuánto se hundía cada cosa en el círculo del
 /// nodo, para saber a qué velocidad choca.
@@ -128,8 +114,7 @@ impl Contactos {
         // los bordes de la vista, en el orden x0, y0, x1, y1. La gota choca antes, a lo que asoma
         // su anillo (ANILLO) : contra el borde lo tapaba entero
         let mut bordes = [-SIN_BORDE, -SIN_BORDE, SIN_BORDE, SIN_BORDE];
-        if bien && escena.ancho > 0 && escena.alto > 0 && escena.escala > 0.0 {
-            let v = vista(escena);
+        if let (true, Some(v)) = (bien, vista(escena)) {
             bordes = [
                 (v[0] - c.x) / radio + ANILLO,
                 (v[1] - c.y) / radio + ANILLO,

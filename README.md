@@ -42,6 +42,11 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
   Va en piezas (partículas, campo, canales y pintura; `nucleo/nodos/gota_*`), y con `AGUJERO_RELOJ` se repite bit a
   bit. Cómo se midió y qué se cambió, en `nucleo/nodos/RAYO-LEGO.md`.
 
+Los nodos no se tocan: `separar_nodos` (`shd::nodos::choque`, también desde C++) aparta cada par que queda más cerca
+que la suma de sus radios por `SEPARACION` (1,5), con las gotas de los dos apenas rozándose. El arrastrado no se mueve, y
+un nodo que estaba en la vista no sale de ella por un choque. El vórtice no choca: los nodos atraviesan la gota y la
+deforman. Quien integra lo llama en cada fotograma, después de mover los nodos y antes de preparar las pasadas.
+
 ## Integrar N-SHD
 
 - **Rust:** depende del crate `shd` (`motor/`). Si la interfaz va por otro lado, traduce lo que le llegue a

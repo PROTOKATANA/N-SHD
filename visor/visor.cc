@@ -576,6 +576,10 @@ public:
 
 		if (guion_) { seguir_guion(ancho) ; }
 
+		// los nodos no se tocan; el vórtice no choca, porque es la gota
+
+		shd :: nodos :: separar_nodos(escena_ , rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size()) , static_cast<std :: uint32_t>(agarrado_ + 1)) ;
+
 		fotograma_ = { escena_ , &nodos_ , &aristas_ , uniforme_ } ;
 
 		camara_ = shd :: nodos :: camara_de(escena_ , ancho , alto) ;
@@ -745,8 +749,9 @@ private:
 
 	}
 
-	// Una pared de tres nodos que se tocan : el vórtice la atraviesa, se queda al otro lado,
-	// se aleja y vuelve. Lo que quede atrapado detrás no debe cruzarla
+	// Una pared de tres nodos tan juntos como deja su choque (separar_nodos), con sus gotas
+	// rozándose : el vórtice la atraviesa, se queda al otro lado, se aleja y vuelve. Lo que
+	// quede atrapado detrás no debe cruzarla
 
 	void seguir_pared() {
 
@@ -754,7 +759,7 @@ private:
 
 		for (std :: size_t i = 1 ; i < nodos_.size() ; i++) {
 
-			const float y = i <= 3 ? (static_cast<float>(i) - 2) * 32 : (i % 2 == 0 ? 180.0f : -180.0f) ;
+			const float y = i <= 3 ? (static_cast<float>(i) - 2) * 16 * 2 * shd :: nodos :: separacion_nodos() : (i % 2 == 0 ? 180.0f : -180.0f) ;
 
 			const float x = i <= 3 ? 0.0f : (static_cast<float>(i / 2) - 2.5f) * 100 ;
 

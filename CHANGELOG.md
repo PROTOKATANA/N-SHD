@@ -33,3 +33,7 @@
   líquido de los enlaces. La imagen, idéntica byte a byte.
 - `PasadaLiquido` pinta los enlaces de un grafo sin vórtice: esperaba la distancia de la gota, que sin vórtice no se
   crea nunca, y el grafo salía vacío. Ahora ata una vacía en su lugar; con vórtice, la imagen no cambia.
+- Los nodos no se tocan (`separar_nodos`, `shd::nodos::choque`): el choque del antiguo motor de fuerzas de CORTEX, a
+  1,5 veces la suma de sus radios. El arrastrado no cede, salvo contra un nodo que el borde acaba de devolver, y un
+  choque no saca a un nodo de la vista. El vórtice no choca: los nodos siguen atravesando la gota. El visor lo aplica
+  en cada fotograma, y la pared de su guion `pared` queda tan junta como deja el choque.
