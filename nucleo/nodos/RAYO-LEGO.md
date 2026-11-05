@@ -285,6 +285,15 @@ existen.
 - **Para quien integra**: `Escena` pierde su último campo, `vortice_libre`, y `PasadaLiquido` recibe la gota
   primero: `PasadaLiquido(* gota , con_rejilla)`.
 
+### Un grafo sin vórtice
+
+- **Qué**: `PasadaLiquido` no se pintaba hasta tener atada la distancia de la gota, y sin vórtice
+  la gota no la crea nunca: el grafo salía vacío (1 color en cada fotograma, solo el fondo). Ahora,
+  sin vórtice, ata una distancia vacía de un elemento, que nadie lee porque ningún nodo es anillo.
+- **Prueba**: con el vórtice a 0 en el visor (un cambio local, fuera del commit), de 1 color a 2918
+  en cada fotograma, con los nueve nodos y sus enlaces. Con vórtice, los 811 fotogramas idénticos.
+  La puerta no corre la GPU, así que esto no lo vigila ninguna prueba.
+
 ## Lo que pide una decisión
 
 1. **El reparto del líquido en la CPU** (6): de 26 a 63 µs más por fotograma a cambio de hasta

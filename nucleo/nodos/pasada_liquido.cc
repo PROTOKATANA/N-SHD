@@ -148,6 +148,11 @@ struct PasadaLiquido :: Pipelines {
 
 	RefCntAutoPtr<IBuffer> uniforme ;
 
+	// sin vórtice, la gota no tiene distancia : esta, vacía, ocupa su sitio. Nadie la lee,
+	// porque sin vórtice ningún nodo es anillo
+
+	RefCntAutoPtr<IBuffer> sin_gota ;
+
 	bool crear(const Gpu & gpu , IBuffer * camara , std :: string & error) {
 
 		device = gpu.device ;
@@ -198,6 +203,10 @@ struct PasadaLiquido :: Pipelines {
 		gpu.device->CreateBuffer(desc , nullptr , &uniforme) ;
 
 		if (!uniforme) { return gpu_fallo(error , "No se pudo crear el uniform del liquido") ; }
+
+		sin_gota = gpu_campo(gpu , { 1 , sizeof(float) , "Nodos liquido sin gota" }) ;
+
+		if (!sin_gota) { return gpu_fallo(error , "No se pudo crear la distancia vacia del liquido") ; }
 
 		GraphicsPipelineStateCreateInfo pso = gpu_pso_mezcla("Nodos liquido") ;
 
@@ -267,15 +276,18 @@ bool PasadaLiquido :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu
 
 }
 
-void PasadaLiquido :: subir(IDeviceContext * ctx , const Fotograma &) {
+void PasadaLiquido :: subir(IDeviceContext * ctx , const Fotograma & f) {
 
 	if (!hay_) { return ; }
 
 	ctx->UpdateBuffer(pipes_->uniforme , 0 , sizeof(liquido_) , &liquido_ , RESOURCE_STATE_TRANSITION_MODE_TRANSITION) ;
 
-	// la distancia de la gota, si cambió (la gota se crea al preparar, después que esta)
+	// la distancia de la gota, si cambió (la gota se crea al preparar, después que esta). Sin
+	// vórtice no la crea nunca : el líquido se pinta sin anillo, con la vacía
 
 	IBuffer * distancia = gota_.distancia_gota() ;
+
+	if (!distancia && f.escena.vortice == 0) { distancia = pipes_->sin_gota ; }
 
 	if (distancia && distancia != atada_) {
 
@@ -291,7 +303,7 @@ void PasadaLiquido :: dibujar(IDeviceContext * ctx , const Fotograma &) {
 
 	if (!hay_) { return ; }
 
-	// hasta que la distancia de la gota esté atada (el primer fotograma)
+	// hasta que la distancia de la gota esté atada (el primer fotograma, con vórtice)
 
 	if (!atada_) { return ; }
 

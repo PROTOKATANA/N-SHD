@@ -31,3 +31,5 @@
   visor la abre así sin variables; `SHD_GOTA_ENVUELTA` ya no existe. Fuera también lo que solo usaba la libre: las gotas
   ajenas y la fusión gradual con los tubos ajenos en el cbuffer de la gota, y lo que se hundía la gota del vórtice en el
   líquido de los enlaces. La imagen, idéntica byte a byte.
+- `PasadaLiquido` pinta los enlaces de un grafo sin vórtice: esperaba la distancia de la gota, que sin vórtice no se
+  crea nunca, y el grafo salía vacío. Ahora ata una vacía en su lugar; con vórtice, la imagen no cambia.
