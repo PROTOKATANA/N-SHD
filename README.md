@@ -28,9 +28,7 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
 
 - `PasadaLiquido`: los enlaces como un líquido. Es un campo de distancia evaluado en un quad, con una
   rejilla de culling de celdas tan pequeñas como quepan. Admite 256 nodos y 512 enlaces, porque es para un menú.
-- `PasadaVortice`: un nodo que es un remolino de fluido de verdad dentro de un círculo rígido, Stable Fluids en
-  compute shaders. Al pulsarlo, se agita.
-- `PasadaGota`: el mismo remolino como un líquido suelto, sin pared. Son 4.096 partículas que resuelven
+- `PasadaGota`: el vórtice, un nodo que es un remolino de líquido, sin pared; al pulsarlo, se agita. Son 4.096 partículas que resuelven
   Navier-Stokes (Position Based Fluids): se estira, choca con otros nodos y con los bordes de la vista, y se
   recompone. El líquido vive en el marco de su nodo: arrastrarlo no lo separa del enlace, y solo se mece el borde. El
   color lo lleva el propio líquido: un golpe o un clic lo mezclan, y se asienta poco a poco. Un nodo que se acerca la
@@ -90,13 +88,13 @@ Lo que un integrador no debe olvidar:
 ```bash
 cmake -S . -B build -DDILIGENT_CORE_SOURCE_DIR=<checkout de DiligentCore v2.5.6>
 cmake --build build --target shd_visor
-build/visor/shd_visor agujero     # o nodos, o gota
+build/visor/shd_visor agujero     # o nodos
 ```
 
 Sin `DILIGENT_CORE_SOURCE_DIR`, CMake descarga DiligentCore fijado al commit. La ventana es XCB, y funciona
 bajo XWayland.
 
-Teclas: `1` el agujero, `2` los nodos, `3` la gota, `q` o `Esc` para salir. En el agujero, el botón izquierdo orbita, el
+Teclas: `1` el agujero, `2` los nodos, `q` o `Esc` para salir. En el agujero, el botón izquierdo orbita, el
 derecho rueda y el doble clic agita. En los nodos, arrastrar mueve cualquier nodo, también el vórtice, contra otro o contra los bordes, y un clic en
 el vórtice lo agita.
 
@@ -117,13 +115,13 @@ AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> AGUJERO_VOLCAR_TIEMPOS=2.5,8,20 SHD_TAM
 Con volcados el visor no presenta en la ventana: presentando, el polvo deja de ser repetible a partir de
 unos 10 s, por una causa sin identificar.
 
-**Banco de la GPU:** con `SHD_BANCO_GPU=1`, en las escenas de nodos, lo que tarda cada pasada y cada tramo de dentro,
+**Banco de la GPU:** con `SHD_BANCO_GPU=1`, en la escena de los nodos, lo que tarda cada pasada y cada tramo de dentro,
 con el mínimo, la mediana y el p95 cada 300 fotogramas y al salir. `SHD_NODOS_MALLA=16x16` dibuja una malla de nodos para medir el
 líquido con un grafo grande:
 
 ```bash
 AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> SHD_NODOS_VOLCAR=900 SHD_TAM=800x600 SHD_BANCO_GPU=1 \
-  build/visor/shd_visor gota
+  build/visor/shd_visor nodos
 ```
 
 ## Licencias

@@ -4,10 +4,8 @@
 //! el hilo que pinta.
 
 use super::camara::camara_de;
-use super::fluido::{forma_fluido_vortice, huella, q_circulo};
 use super::gota::{EstadoGota, desc_gota, estado_gota};
 use super::liquido::rellenar_liquido_en_camara as rellenar_liquido;
-use super::vortice::{EstadoVortice, diagnostico_vortice, estado_vortice};
 
 #[cxx::bridge(namespace = "shd::nodos")]
 mod ffi {
@@ -36,7 +34,7 @@ mod ffi {
         resaltado: u32,
         /// Índice del nodo vórtice + 1; 0 = ninguno.
         vortice: u32,
-        /// Veces que se pulsó el vórtice: al cambiar, se reorganiza.
+        /// Veces que se pulsó el vórtice: al cambiar, la gota se agita.
         pulsos: u32,
         /// Tamaño de la vista en píxeles, para sus bordes; 0, sin bordes.
         ancho: u32,
@@ -81,23 +79,6 @@ mod ffi {
         /// La gota envuelta: el centro (x, y) y el radio (mundo) de su rejilla, y lo que asoma su
         /// anillo alrededor de ella (radios).
         anillo: [f32; 4],
-    }
-
-    /// El cbuffer «Vortice»: lo leen su forzamiento en el solver y su pintado.
-    #[derive(Clone, Copy, Debug, Default, PartialEq)]
-    struct VorticeGpu {
-        /// x, y (mundo), radio que se ve (mundo), tiempo (s).
-        centro: [f32; 4],
-        /// Cuántos, fase, brillo, semilla de la última pulsación.
-        brazos: [f32; 4],
-        /// Segundos desde la pulsación, duración, aceleración de los chorros, turbulencia.
-        agitar: [f32; 4],
-        /// rgba del nodo.
-        color: [f32; 4],
-        /// Velocidad, núcleo, arrastre, calentar.
-        giro: [f32; 4],
-        /// Por celda: entrada en el borde, salida en el ojo (negativa); q del borde, q del ojo.
-        fuentes: [f32; 4],
     }
 
     /// El cbuffer «Gota». Lo que no sea `centro` va relativo al centro del nodo y en múltiplos de su
@@ -158,39 +139,6 @@ mod ffi {
         vista: f32,
     }
 
-    /// Lo que da el estado del vórtice para un fotograma.
-    #[derive(Clone, Copy, Debug, Default, PartialEq)]
-    struct FotogramaVortice {
-        cbuffer: VorticeGpu,
-        /// s.
-        dt: f32,
-    }
-
-    /// La rejilla y el solver de un fluido.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct FormaFluido {
-        /// Lado de la rejilla.
-        celdas: u32,
-        /// Iteraciones de presión por paso.
-        jacobi: u32,
-        /// Refuerzo de los remolinos pequeños (vorticity confinement).
-        confinamiento: f32,
-    }
-
-    /// Si es un fluido incompresible (la divergencia, que la presión deja en casi cero fuera de las
-    /// fuentes) y estable (sin NaN ni velocidades locas).
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct DiagnosticoFluido {
-        /// |∇·v| en las celdas de dentro (sin fuentes ni pared al lado).
-        divergencia_max: f32,
-        divergencia_media: f32,
-        /// celdas/s.
-        velocidad_max: f32,
-        escalar_min: f32,
-        escalar_max: f32,
-        nan: u32,
-    }
-
     extern "Rust" {
         /// La cámara de la escena para una textura de `ancho` × `alto` px, con el centro de la
         /// cámara en el de la textura. La caja la pone el líquido.
@@ -206,21 +154,6 @@ mod ffi {
             liquido: &mut LiquidoGpu,
             camara: &mut CamaraGpu,
             con_rejilla: bool,
-        ) -> bool;
-
-        /// El reloj y las pulsaciones de un vórtice, de un fotograma al siguiente.
-        type EstadoVortice;
-
-        fn estado_vortice() -> Box<EstadoVortice>;
-
-        /// Rellena `f` para el fotograma de `escena`. `ahora`: segundos de un reloj monótono.
-        /// False si la escena no tiene vórtice.
-        fn rellenar(
-            self: &mut EstadoVortice,
-            escena: &Escena,
-            nodos: &[Nodo],
-            ahora: f64,
-            f: &mut FotogramaVortice,
         ) -> bool;
 
         /// El reloj, la pulsación y lo que choca con la gota, de un fotograma al siguiente.
@@ -240,30 +173,12 @@ mod ffi {
         ) -> bool;
 
         fn desc_gota() -> DescGota;
-
-        /// La rejilla y el solver del fluido del vórtice.
-        fn forma_fluido_vortice() -> FormaFluido;
-
-        /// La q del círculo de una rejilla de `celdas`.
-        fn q_circulo(celdas: u32) -> f32;
-
-        /// El diagnóstico de un estado del fluido del vórtice: `celdas`² velocidades (x, y) y
-        /// `celdas`² valores del escalar.
-        fn diagnostico_vortice(vel: &[f32], escalar: &[f32], celdas: u32) -> DiagnosticoFluido;
-
-        /// FNV-1a de 64 bits. `base`, para encadenar varios búferes: la de partida es
-        /// [`super::fluido::HUELLA_INICIAL`].
-        fn huella(datos: &[u8], base: u64) -> u64;
     }
 }
 
-pub use ffi::{
-    CamaraGpu, DescGota, DiagnosticoFluido, Escena, FormaFluido, FotogramaVortice, GotaGpu, LiquidoGpu, Nodo,
-    VorticeGpu,
-};
+pub use ffi::{CamaraGpu, DescGota, Escena, GotaGpu, LiquidoGpu, Nodo};
 
 const _: () = assert!(size_of::<CamaraGpu>() == 48);
-const _: () = assert!(size_of::<VorticeGpu>() == 96);
 const _: () = assert!(size_of::<GotaGpu>() == 288 + 16 + 64 + 16 * 2 + 12 * 16 + 16 * 16 + 4 * 16 * 2);
 const _: () = assert!(size_of::<LiquidoGpu>() == 48 + 256 * 16 * 3 + 1024 * 4 + 24544 * 2 + 16);
 const _: () = assert!(size_of::<LiquidoGpu>() <= 65536, "un cbuffer mide como mucho 64 KiB");

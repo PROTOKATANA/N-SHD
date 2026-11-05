@@ -24,3 +24,5 @@
   son solo sus enlaces, un 70 % más cortos, y choca con la vista a lo que asoma el anillo. Más barata que la libre
   (simular 0,754 ms frente a 0,83; pintar 0,097 frente a 0,13); el líquido, de 0,133 a 0,139. En el visor, con
   `SHD_GOTA_ENVUELTA`. Ver RAYO-LEGO.md.
+- Quitado el vórtice rígido (`PasadaVortice`, su fluido `Fluido` y `fluido_stam`), una versión de prueba: el vórtice de
+  los nodos es la gota. El visor deja una sola escena de nodos, `nodos` (tecla `2`); `gota` y la tecla `3` ya no existen.

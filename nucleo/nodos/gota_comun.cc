@@ -59,8 +59,8 @@ float cohesion_en(float r) {
 }
 
 // El calor al que tiende el líquido, en d del centro de masa : brazos fríos y calientes
-// y más calor hacia el ojo. Es el de PasadaVortice ya asentado, medido, no el de su
-// arranque. Pasa de 1 a propósito : así el rojo del centro queda plano, y lo que se
+// y más calor hacia el ojo. Es el del remolino de fluido que fue antes el vórtice, ya
+// asentado, medido, no el de su arranque. Pasa de 1 a propósito : así el rojo del centro queda plano, y lo que se
 // mezcla a su alrededor no lo apaga
 float calor_remolino(float2 d, float tiempo) {
   float rho = length(d);

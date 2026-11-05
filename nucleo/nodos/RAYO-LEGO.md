@@ -135,7 +135,7 @@ mínimos y medianas.
 | `gota_sueltos` | Qué líquido está unido al cuerpo de la gota | campo y canales | unido |
 | `gota_pintura` | El contorno, los canales y las bandas, sin los trozos sueltos | campo, canales y unido | la imagen |
 | `pasada_gota` | Las une: el cbuffer, el orden y las transiciones | — | — |
-| `comun/bloque_hlsl` | Iterar un estencil en bloques | — | — |
+| `comun/bloque_hlsl` | Iterar un estencil en bloques (los canales) | — | — |
 | `gota/` (Rust) | `contactos`, `retraso` y `cercano`; `EstadoGota` los une | — | — |
 | `liquido/rejilla` (Rust) | La rejilla de culling del líquido | — | — |
 
@@ -247,6 +247,22 @@ libre, byte a byte contra la versión anterior.
 - **Donde está el tiempo**: la presión de las partículas (0,212 ms), el líquido de los enlaces
   (0,139), los trozos sueltos (0,103) y el campo (0,082). La presión es la física de la gota, ya
   medida antes en este informe.
+
+## Después: solo la gota envuelta (2026-11-05)
+
+Los nodos quedan con una sola versión, la definitiva: la gota envuelta. Las de prueba se quitan.
+Lo que este informe cuenta antes del vórtice rígido y de la gota libre es historia: esas piezas ya no
+existen.
+
+### Sin el vórtice rígido
+
+- **Qué**: fuera `PasadaVortice`, su fluido (`fluido_gpu`, la interfaz `Fluido`, y `fluido_stam`)
+  y, en Rust, `vortice` y `fluido`, con su parte del puente (`VorticeGpu`, `EstadoVortice` y el
+  diagnóstico y la huella del fluido). Unas 1800 líneas. `comun/bloque_hlsl` se queda, porque lo
+  usan los canales de la gota.
+- **Visor**: una sola escena de nodos, `nodos`. La escena `gota` y la tecla `3` ya no existen.
+- **Prueba**: la gota envuelta, idéntica byte a byte a main en los 811 fotogramas de los cuatro
+  guiones.
 
 ## Lo que pide una decisión
 
