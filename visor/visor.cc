@@ -17,8 +17,8 @@
 // nodos solo, para ver los choques sin ratón ; con SHD_NODOS_GUION=arrastre, el
 // vórtice va de lado a lado cada vez más rápido; con SHD_NODOS_GUION=pared, atraviesa una
 // pared de nodos y se aleja; con SHD_NODOS_GUION=cerca, se acerca a un enlace ajeno hasta
-// cruzarlo. Con SHD_GOTA_ENVUELTA, la gota va envuelta en un anillo del líquido de los enlaces
-// que sigue su forma (sin vórtice libre), como en CORTEX.
+// cruzarlo. El vórtice es la gota, envuelta en un anillo del líquido de los enlaces que sigue
+// su forma.
 //
 // El banco, en los nodos : con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y cada tramo
 // de dentro (banco_visor.h); con SHD_NODOS_MALLA=<c>x<f>, una malla de nodos en vez de los
@@ -503,11 +503,10 @@ public:
 
 		auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
 
-		// envuelta, el líquido lee de la gota lo lejos que queda : su anillo la sigue
+		// el líquido lee de la gota lo lejos que queda : su anillo la sigue. Va antes que la gota,
+		// que se pinta encima
 
-		const bool envuelta = std :: getenv("SHD_GOTA_ENVUELTA") != nullptr ;
-
-		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(true , envuelta ? la_gota.get() : nullptr)) ;
+		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* la_gota)) ;
 
 		pasadas_.push_back(std :: move(la_gota)) ;
 
@@ -568,8 +567,6 @@ public:
 		escena_.cuenta_nodos = static_cast<std :: uint32_t>(nodos_.size()) ;
 
 		escena_.vortice = 1 ;
-
-		escena_.vortice_libre = !std :: getenv("SHD_GOTA_ENVUELTA") ;
 
 		escena_.ancho = ancho ;
 

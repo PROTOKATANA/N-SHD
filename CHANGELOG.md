@@ -26,3 +26,8 @@
   `SHD_GOTA_ENVUELTA`. Ver RAYO-LEGO.md.
 - Quitado el vórtice rígido (`PasadaVortice`, su fluido `Fluido` y `fluido_stam`), una versión de prueba: el vórtice de
   los nodos es la gota. El visor deja una sola escena de nodos, `nodos` (tecla `2`); `gota` y la tecla `3` ya no existen.
+- Quitada la gota libre (`Escena :: vortice_libre`), una versión de prueba: la gota va siempre envuelta, sus canales son
+  solo sus enlaces y `PasadaLiquido` exige la gota (`PasadaLiquido(const DistanciaGota & , bool con_rejilla)`). El
+  visor la abre así sin variables; `SHD_GOTA_ENVUELTA` ya no existe. Fuera también lo que solo usaba la libre: las gotas
+  ajenas y la fusión gradual con los tubos ajenos en el cbuffer de la gota, y lo que se hundía la gota del vórtice en el
+  líquido de los enlaces. La imagen, idéntica byte a byte.

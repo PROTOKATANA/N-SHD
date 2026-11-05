@@ -39,12 +39,6 @@ mod ffi {
         /// Tamaño de la vista en píxeles, para sus bordes; 0, sin bordes.
         ancho: u32,
         alto: u32,
-        /// El vórtice es un líquido suelto (`PasadaGota`): su forma cambia, así que en el líquido de
-        /// los enlaces su gota no asoma alrededor, o se vería un círculo fijo debajo. Si no, la gota
-        /// va envuelta: el líquido de los enlaces le pinta un anillo que sigue su forma (con la
-        /// distancia de la gota, `DistanciaGota`), sus canales son solo sus enlaces y choca con la
-        /// vista a lo que asoma el anillo.
-        vortice_libre: bool,
     }
 
     /// El cbuffer «Camara» que comparten las pasadas.
@@ -66,9 +60,9 @@ mod ffi {
         cuenta: [f32; 4],
         /// x0, y0, lado de celda (mundo), columnas.
         rejilla: [f32; 4],
-        /// x, y, radio que se ve (mundo), lo que se hunde su gota (mundo).
+        /// x, y, radio que se ve (mundo), 0.
         nodos: [[f32; 4]; 256],
-        /// rgb, y en a si su gota es el anillo de la gota envuelta (1 o 0).
+        /// rgb, y en a si su gota es el anillo del vórtice (1 o 0).
         colores: [[f32; 4]; 256],
         /// Dos enlaces por elemento.
         aristas: [[u32; 4]; 256],
@@ -76,7 +70,7 @@ mod ffi {
         celdas: [[u32; 4]; 256],
         /// Dos índices de 16 bits por uint: nodo i, o enlace nodos + e.
         indices: [[u32; 4]; 3068],
-        /// La gota envuelta: el centro (x, y) y el radio (mundo) de su rejilla, y lo que asoma su
+        /// La gota del vórtice: el centro (x, y) y el radio (mundo) de su rejilla, y lo que asoma su
         /// anillo alrededor de ella (radios).
         anillo: [f32; 4],
     }
@@ -108,17 +102,15 @@ mod ffi {
         barrido: [[f32; 4]; 4],
         /// La forma del líquido de los enlaces: gota, fusión, cuello, 0.
         tubo: [f32; 4],
-        /// Cuántas gotas y cuántos tubos del líquido de los enlaces hay cerca, 0, 0.
+        /// Si está el círculo del vórtice (1 o 0) y cuántos de sus enlaces, 0, 0.
         cuenta_liquido: [f32; 4],
-        /// Las gotas del líquido de los enlaces cerca del vórtice, en su orden: x, y, radio que se ve,
-        /// fusión.
-        gotas: [[f32; 4]; 12],
-        /// Sus tubos: un extremo (x, y) y el otro (x, y).
+        /// El círculo del vórtice en el líquido de los enlaces, hundido bajo la gota: x, y, radio que
+        /// se ve, fusión.
+        circulo: [f32; 4],
+        /// Sus enlaces: un extremo (x, y) y el otro (x, y).
         tubos: [[f32; 4]; 16],
         /// La media anchura de cada tubo, cuatro por elemento.
         anchos: [[f32; 4]; 4],
-        /// Lo que se funde la gota con cada tubo, de 0 a 1, cuatro por elemento.
-        funde: [[f32; 4]; 4],
     }
 
     /// Lo que fija el tamaño de la simulación: va en el HLSL.
@@ -179,7 +171,7 @@ mod ffi {
 pub use ffi::{CamaraGpu, DescGota, Escena, GotaGpu, LiquidoGpu, Nodo};
 
 const _: () = assert!(size_of::<CamaraGpu>() == 48);
-const _: () = assert!(size_of::<GotaGpu>() == 288 + 16 + 64 + 16 * 2 + 12 * 16 + 16 * 16 + 4 * 16 * 2);
+const _: () = assert!(size_of::<GotaGpu>() == 288 + 16 + 64 + 16 * 2 + 16 + 16 * 16 + 4 * 16);
 const _: () = assert!(size_of::<LiquidoGpu>() == 48 + 256 * 16 * 3 + 1024 * 4 + 24544 * 2 + 16);
 const _: () = assert!(size_of::<LiquidoGpu>() <= 65536, "un cbuffer mide como mucho 64 KiB");
 

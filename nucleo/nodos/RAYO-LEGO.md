@@ -264,6 +264,27 @@ existen.
 - **Prueba**: la gota envuelta, idéntica byte a byte a main en los 811 fotogramas de los cuatro
   guiones.
 
+### Sin la gota libre
+
+- **Qué**: fuera `Escena :: vortice_libre` y `SHD_GOTA_ENVUELTA`. La gota va siempre envuelta, y
+  `PasadaLiquido` exige la gota (`const DistanciaGota &`): su shader ya no tiene la variante sin
+  anillo (`ANILLO_GOTA`).
+- **Lo que solo usaba la libre**, también fuera:
+  - En el cbuffer de la gota, las 12 gotas de los nodos cercanos (queda una, el círculo del vórtice,
+    `circulo`) y `funde`, la fusión gradual con un tubo ajeno. Envuelta, sus canales son solo sus
+    enlaces, y cada uno se funde del todo.
+  - En `cercano`, la búsqueda de lo ajeno cercano: `distancia_al_centro`, `CERCA_TUBO`, `FUNDE_HASTA` y
+    `FUNDE_BANDA`.
+  - En el líquido de los enlaces, lo que se hundía la gota del vórtice (`nodos[].w`, ahora 0).
+    `gota_vortice_libre` se llama ahora `gota_vortice_hundida`: es lo que se hunde el círculo del
+    vórtice en la silueta de sus canales, para que su líquido no llene el anillo.
+- **Prueba**: los 811 fotogramas de los cuatro guiones, idénticos byte a byte a la gota envuelta de
+  main, también con todo el C++ de los nodos recompilado sobre la cabecera nueva de cxx. 63 pruebas de
+  Rust (las de la libre, fuera; nuevas: sin vórtice no hay anillo, y sin un vórtice bien no hay
+  canales).
+- **Para quien integra**: `Escena` pierde su último campo, `vortice_libre`, y `PasadaLiquido` recibe la gota
+  primero: `PasadaLiquido(* gota , con_rejilla)`.
+
 ## Lo que pide una decisión
 
 1. **El reparto del líquido en la CPU** (6): de 26 a 63 µs más por fotograma a cambio de hasta

@@ -2,7 +2,8 @@
 //!
 //! - [`camara`]: el cbuffer que comparten las pasadas.
 //! - [`liquido`]: los enlaces como un líquido, con su rejilla de culling.
-//! - [`gota`]: el vórtice como un líquido suelto: su reloj, lo que choca con él y con qué fuerza.
+//! - [`gota`]: el vórtice como un líquido, envuelto en el anillo del líquido de los enlaces: su reloj,
+//!   lo que choca con él y con qué fuerza.
 //!
 //! La escena la pone quien integra: un grafo, o cualquier lista de nodos y enlaces.
 

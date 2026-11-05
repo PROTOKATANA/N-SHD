@@ -32,12 +32,13 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
   Navier-Stokes (Position Based Fluids): se estira, choca con otros nodos y con los bordes de la vista, y se
   recompone. El líquido vive en el marco de su nodo: arrastrarlo no lo separa del enlace, y solo se mece el borde. El
   color lo lleva el propio líquido: un golpe o un clic lo mezclan, y se asienta poco a poco. Un nodo que se acerca la
-  atrae y la gota lo envuelve, sin cubrir su círculo. Los canales los llena un segundo fluido, en una rejilla, con la
-  forma elástica del líquido de los enlaces: entra por cada canal hasta donde el canal lo deja, en forma de estrella, y
-  rodea los nodos. Cada canal se funde con la gota como el líquido de los enlaces con sus nodos, y sale con el color de su
-  borde, para que se vean como un mismo líquido. Solo se pinta el líquido.
-  Los bordes salen de `Escena`: sin `ancho` y `alto`, no hay. Con `vortice_libre`, `PasadaLiquido` no pinta el círculo
-  del vórtice alrededor, y los enlaces llegan hasta el contorno real del líquido.
+  atrae y la gota lo envuelve, sin cubrir su círculo. Sus canales son solo sus enlaces: los llena un segundo fluido, en
+  una rejilla, con la forma elástica del líquido de los enlaces, y entra por cada uno hasta donde el canal lo deja. Lo
+  ajeno que pasa cerca o por debajo no entra. Cada canal se funde con la gota como el líquido de los enlaces con sus
+  nodos, y sale con el color de su borde, para que se vean como un mismo líquido. Solo se pinta el líquido.
+  La gota va envuelta: `PasadaLiquido` le pinta alrededor un anillo que sigue su forma, en los bordes, en las esquinas
+  y cuando un nodo la atraviesa, porque lee de la gota lo lejos que queda (`DistanciaGota`). Los bordes salen de
+  `Escena`: sin `ancho` y `alto`, no hay, y la gota choca con ellos a lo que asoma el anillo.
   Va en piezas (partículas, campo, canales y pintura; `nucleo/nodos/gota_*`), y con `AGUJERO_RELOJ` se repite bit a
   bit. Cómo se midió y qué se cambió, en `nucleo/nodos/RAYO-LEGO.md`.
 
@@ -70,6 +71,14 @@ agujero.ajustar(ancho , alto , error) ;
 agujero.avanzar(ancho , alto , error) ;     // con el turno de la GPU
 // fija tu objetivo y el viewport, de ancho × alto
 agujero.pintar(ancho , alto) ;
+```
+
+Las pasadas de los nodos, en este orden: el líquido de los enlaces lee de la gota, y la gota se pinta encima.
+
+```cpp
+auto gota = std :: make_unique<shd :: nodos :: PasadaGota>(shd :: reloj_monotono()) ;
+pasadas.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* gota)) ;   // la gota vive lo que la lista
+pasadas.push_back(std :: move(gota)) ;
 ```
 
 Un fotograma de los nodos: rellena `shd :: nodos :: Fotograma` y llama a cada `Pasada` en orden con

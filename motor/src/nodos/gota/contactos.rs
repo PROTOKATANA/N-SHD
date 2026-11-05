@@ -125,17 +125,16 @@ impl Contactos {
                 }
             }
         }
-        // los bordes de la vista, en el orden x0, y0, x1, y1. Envuelta, la gota choca antes, a lo
-        // que asoma su anillo (ANILLO) : contra el borde lo tapaba entero
+        // los bordes de la vista, en el orden x0, y0, x1, y1. La gota choca antes, a lo que asoma
+        // su anillo (ANILLO) : contra el borde lo tapaba entero
         let mut bordes = [-SIN_BORDE, -SIN_BORDE, SIN_BORDE, SIN_BORDE];
         if bien && escena.ancho > 0 && escena.alto > 0 && escena.escala > 0.0 {
             let v = vista(escena);
-            let anillo = if escena.vortice_libre { 0.0 } else { ANILLO };
             bordes = [
-                (v[0] - c.x) / radio + anillo,
-                (v[1] - c.y) / radio + anillo,
-                (v[2] - c.x) / radio - anillo,
-                (v[3] - c.y) / radio - anillo,
+                (v[0] - c.x) / radio + ANILLO,
+                (v[1] - c.y) / radio + ANILLO,
+                (v[2] - c.x) / radio - ANILLO,
+                (v[3] - c.y) / radio - ANILLO,
             ];
             let direcciones = [(-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0)];
             for (k, (x, y)) in direcciones.into_iter().enumerate() {
@@ -199,18 +198,11 @@ mod tests {
         let e = Escena {
             ancho: 400,
             alto: 200,
-            vortice_libre: true,
             ..escena()
         };
         let g = rellenar(&mut Contactos::default(), &e, &nodos);
-        // la vista va de -200 a 200 y de -100 a 100, y el vórtice mide 10
-        assert_eq!(g.bordes, [-30.0, -15.0, 10.0, 5.0]);
-        // envuelta, a lo que asoma su anillo antes
-        let envuelta = Escena {
-            vortice_libre: false,
-            ..e
-        };
-        let g = rellenar(&mut Contactos::default(), &envuelta, &nodos);
+        // la vista va de -200 a 200 y de -100 a 100, y el vórtice mide 10: a lo que asoma su anillo
+        // antes
         let esperado = [-30.0 + ANILLO, -15.0 + ANILLO, 10.0 - ANILLO, 5.0 - ANILLO];
         assert!(
             g.bordes.iter().zip(esperado).all(|(a, b)| (a - b).abs() < 1e-5),
