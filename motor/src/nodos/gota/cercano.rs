@@ -3,19 +3,14 @@
 use super::super::liquido::FORMA as LIQUIDO;
 use super::super::puente::{Escena, GotaGpu, Nodo};
 
-/// Gotas del líquido de los enlaces que se copian cerca del vórtice.
-pub const MAX_GOTAS: usize = 12;
-
-/// Tubos del líquido de los enlaces que se copian cerca del vórtice.
+/// Tubos del líquido de los enlaces que se copian cerca del vórtice: sus enlaces.
 pub const MAX_TUBOS: usize = 16;
 
-/// radios: lo que se aleja una gota del borde del vórtice y aún cuenta.
-const CERCA_LIQUIDO: f32 = 1.2;
-
-/// La silueta del líquido de los enlaces cerca del vórtice, igual que la pinta `PasadaLiquido`: sus
-/// gotas y sus tubos, en el mismo orden y con la misma unión suave. Es la pared de las tuberías de
-/// la gota: así un puente que engorda, porque sus nodos se juntan, es una tubería más ancha. Todo
-/// relativo al vórtice y en sus radios.
+/// La silueta de los canales de la gota, igual que la pinta `PasadaLiquido`: el círculo del vórtice
+/// y sus enlaces, en el mismo orden y con la misma unión suave. La gota va envuelta en el anillo que
+/// le pinta el líquido de los enlaces y es una esfera: sus canales son solo sus enlaces. Lo ajeno
+/// que pasa cerca o por debajo no cuenta, o su canal pintaba sobre el borde de la gota y la cortaba
+/// en recto; la deforman los nodos. Todo relativo al vórtice y en sus radios.
 pub(super) fn liquido_cercano(
     escena: &Escena,
     nodos: &[Nodo],
@@ -37,107 +32,39 @@ pub(super) fn liquido_cercano(
         };
         nodos[j].radio * factor * encoge
     };
-    // Sin vórtice libre, la gota va envuelta en el anillo que le pinta el líquido de los enlaces
-    // y es una esfera : sus canales son solo sus enlaces. Lo ajeno que pasa cerca o por debajo no cuenta,
-    // o su canal pintaba sobre el borde de la gota y la cortaba en recto; la deforman los nodos
-    let envuelta = !escena.vortice_libre;
-    // los más cercanos al borde del vórtice, y luego en su orden, que es el de la unión suave
-    let mut cerca: Vec<(f32, usize)> = (0..cuantos)
-        .filter(|j| bien(&nodos[*j]) && (!envuelta || *j == i))
-        .map(|j| {
-            let n = nodos[j];
-            let borde = ((n.x - c.x).hypot(n.y - c.y) - LIQUIDO.gota * radio_liquido(j)) / unidad - 1.0;
-            (if j == i { f32::MIN } else { borde }, j)
-        })
-        .filter(|(borde, _)| *borde < CERCA_LIQUIDO)
-        .collect();
-    cerca.sort_by(|a, b| a.0.total_cmp(&b.0));
-    cerca.truncate(MAX_GOTAS);
-    let mut dentro: Vec<usize> = cerca.into_iter().map(|(_, j)| j).collect();
-    dentro.sort_unstable();
-    g.gotas = [[0.0; 4]; MAX_GOTAS];
-    for (k, j) in dentro.iter().enumerate() {
-        let n = nodos[*j];
-        let r = radio_liquido(*j);
-        // La del vórtice, siempre hundida bajo la gota : los canales salen de ella. Envuelta, el
-        // líquido de los enlaces le pinta un anillo; si el canal copiara su círculo, su líquido
-        // lo llenaría y lo taparía
-        let hundir = if *j == i {
-            (LIQUIDO.gota_vortice - LIQUIDO.gota_vortice_libre) * n.radio * factor
-        } else {
-            0.0
-        };
-        g.gotas[k] = [
-            (n.x - c.x) / unidad,
-            (n.y - c.y) / unidad,
+    // El círculo del vórtice, siempre hundido bajo la gota : los canales salen de él. El líquido
+    // de los enlaces le pinta un anillo; si el canal copiara su círculo, su líquido lo llenaría y
+    // lo taparía
+    let hay = i < cuantos && bien(&c);
+    g.circulo = [0.0; 4];
+    if hay {
+        let r = radio_liquido(i);
+        let hundir = (LIQUIDO.gota_vortice - LIQUIDO.gota_vortice_hundida) * c.radio * factor;
+        g.circulo = [
+            0.0,
+            0.0,
             (LIQUIDO.gota * r - hundir) / unidad,
             LIQUIDO.fusion * r / unidad,
         ];
     }
-    // los tubos que tocan alguna de esas gotas, y los que pasan cerca de la gota aunque sus
-    // extremos queden lejos: los que cruzan por debajo también se funden con ella. Si no caben
-    // todos, los más cercanos, y luego en su orden
+    // sus enlaces, en su orden; si no caben todos, los primeros
     let local = |n: &Nodo| [(n.x - c.x) / unidad, (n.y - c.y) / unidad];
-    let mut tubos: Vec<(f32, usize, usize, usize)> = aristas
+    let tubos: Vec<(usize, usize)> = aristas
         .chunks_exact(2)
-        .enumerate()
-        .filter_map(|(orden, par)| {
-            let (a, b) = (par[0] as usize, par[1] as usize);
-            if a == b || a >= cuantos || b >= cuantos || !bien(&nodos[a]) || !bien(&nodos[b]) {
-                return None;
-            }
-            if envuelta && a != i && b != i {
-                return None;
-            }
-            let lejos = if dentro.contains(&a) || dentro.contains(&b) {
-                0.0
-            } else {
-                distancia_al_centro(local(&nodos[a]), local(&nodos[b]))
-            };
-            (lejos < CERCA_TUBO).then_some((lejos, orden, a, b))
+        .map(|par| (par[0] as usize, par[1] as usize))
+        .filter(|&(a, b)| {
+            hay && a != b && a < cuantos && b < cuantos && (a == i || b == i) && bien(&nodos[a]) && bien(&nodos[b])
         })
+        .take(MAX_TUBOS)
         .collect();
-    tubos.sort_by(|x, y| x.0.total_cmp(&y.0));
-    tubos.truncate(MAX_TUBOS);
-    tubos.sort_by_key(|t| t.1);
     g.tubos = [[0.0; 4]; MAX_TUBOS];
     g.anchos = [[0.0; 4]; MAX_TUBOS / 4];
-    g.funde = [[0.0; 4]; MAX_TUBOS / 4];
-    for (t, (_, _, a, b)) in tubos.iter().enumerate() {
-        let (pa, pb) = (local(&nodos[*a]), local(&nodos[*b]));
+    for (t, &(a, b)) in tubos.iter().enumerate() {
+        let (pa, pb) = (local(&nodos[a]), local(&nodos[b]));
         g.tubos[t] = [pa[0], pa[1], pb[0], pb[1]];
-        g.anchos[t / 4][t % 4] = LIQUIDO.cuello * radio_liquido(*a).min(radio_liquido(*b)) / unidad;
-        // la gota se funde del todo con sus enlaces y con los que pasan por debajo de ella; con uno
-        // ajeno que se acerca, poco a poco: de golpe tendería un puente hasta él
-        g.funde[t / 4][t % 4] = if *a == i || *b == i {
-            1.0
-        } else {
-            ((FUNDE_HASTA - distancia_al_centro(pa, pb)) / FUNDE_BANDA).clamp(0.0, 1.0)
-        };
+        g.anchos[t / 4][t % 4] = LIQUIDO.cuello * radio_liquido(a).min(radio_liquido(b)) / unidad;
     }
-    g.cuenta_liquido = [dentro.len() as f32, tubos.len() as f32, 0.0, 0.0];
-}
-
-/// radios: lo que se aleja del centro del vórtice un tubo que aún cuenta, aunque sus extremos estén
-/// lejos: lo que llega el líquido por los canales y la unión suave, con holgura.
-const CERCA_TUBO: f32 = 2.5;
-
-/// radios desde el centro: un enlace ajeno que pasa a esta distancia empieza a fundirse con la gota,
-/// y del todo a `FUNDE_BANDA` menos.
-const FUNDE_HASTA: f32 = 1.3;
-
-const FUNDE_BANDA: f32 = 0.35;
-
-/// Lo cerca que pasa del centro (0, 0) el segmento de `a` a `b`.
-fn distancia_al_centro(a: [f32; 2], b: [f32; 2]) -> f32 {
-    let ab = [b[0] - a[0], b[1] - a[1]];
-    let largo2 = ab[0] * ab[0] + ab[1] * ab[1];
-    let u = if largo2 > 1e-12 {
-        (-(a[0] * ab[0] + a[1] * ab[1]) / largo2).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    (a[0] + ab[0] * u).hypot(a[1] + ab[1] * u)
+    g.cuenta_liquido = [if hay { 1.0 } else { 0.0 }, tubos.len() as f32, 0.0, 0.0];
 }
 
 #[cfg(test)]
@@ -146,103 +73,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn los_canales_copian_la_silueta_del_liquido_de_los_enlaces_cerca_del_vortice() {
+    fn sus_canales_son_solo_sus_enlaces() {
         let mut g = GotaGpu::default();
         let e = Escena {
-            cuenta_nodos: 3,
-            vortice_libre: true,
+            cuenta_nodos: 5,
             ..escena()
         };
-        // uno cerca, unido al vórtice, y otro lejos, unido al de cerca
-        let nodos = [nodo(0.0, 0.0, 10.0), nodo(25.0, 0.0, 2.0), nodo(200.0, 0.0, 2.0)];
-        liquido_cercano(&e, &nodos, &[0, 1, 1, 2], 0, 1.0, &mut g);
-        assert_eq!(g.cuenta_liquido[0], 2.0, "el vórtice y el de cerca");
-        assert_eq!(g.cuenta_liquido[1], 2.0, "los dos enlaces que tocan a alguno de ellos");
-        assert_eq!(g.tubos[0], [0.0, 0.0, 2.5, 0.0], "en radios del vórtice");
-        let cuello = LIQUIDO.cuello * 0.2;
-        assert!((g.anchos[0][0] - cuello).abs() < 1e-6, "el cuello sale del radio menor");
-        assert_eq!(g.funde[0][1], 0.0, "el que solo pasa cerca no se funde con la gota");
-        assert_eq!(g.funde[0][0], 1.0, "el suyo, del todo");
-        assert!(
-            (g.gotas[1][2] - LIQUIDO.gota * 0.2).abs() < 1e-6,
-            "la gota del de cerca"
-        );
-    }
-
-    #[test]
-    fn un_enlace_que_cruza_por_debajo_tambien_cuenta() {
-        let mut g = GotaGpu::default();
-        let e = Escena {
-            cuenta_nodos: 3,
-            vortice_libre: true,
-            ..escena()
-        };
-        // dos nodos lejos, a cada lado, unidos por un enlace que pasa por debajo del vórtice
-        let nodos = [nodo(0.0, 0.0, 10.0), nodo(-100.0, 5.0, 2.0), nodo(100.0, 5.0, 2.0)];
-        liquido_cercano(&e, &nodos, &[1, 2], 0, 1.0, &mut g);
-        assert_eq!(g.cuenta_liquido[0], 1.0, "solo el vórtice está cerca");
-        assert_eq!(g.cuenta_liquido[1], 1.0, "pero el enlace que lo cruza cuenta");
-        assert_eq!(g.tubos[0], [-10.0, 0.5, 10.0, 0.5]);
-        assert_eq!(g.funde[0][0], 1.0, "y se funde con la gota");
-        // y uno lejos no
-        let lejos = [nodo(0.0, 0.0, 10.0), nodo(-100.0, 80.0, 2.0), nodo(100.0, 80.0, 2.0)];
-        liquido_cercano(&e, &lejos, &[1, 2], 0, 1.0, &mut g);
-        assert_eq!(g.cuenta_liquido[1], 0.0);
-        assert!((distancia_al_centro([-1.0, 2.0], [1.0, 2.0]) - 2.0).abs() < 1e-6);
-        assert!(
-            (distancia_al_centro([3.0, 4.0], [6.0, 8.0]) - 5.0).abs() < 1e-6,
-            "el extremo más cercano"
-        );
-    }
-
-    #[test]
-    fn el_canal_nunca_copia_el_circulo_del_vortice() {
-        // el canal nunca copia el círculo del vórtice, sea libre o envuelta
-        let nodos = [nodo(0.0, 0.0, 10.0), nodo(25.0, 0.0, 2.0)];
-        let radio = |libre: bool| {
-            let mut g = GotaGpu::default();
-            let e = Escena {
-                cuenta_nodos: 2,
-                vortice_libre: libre,
-                ..escena()
-            };
-            liquido_cercano(&e, &nodos, &[0, 1], 0, 1.0, &mut g);
-            g.gotas[0][2]
-        };
-        assert_eq!(radio(false), radio(true));
-        assert!(
-            (radio(true) - LIQUIDO.gota_vortice_libre).abs() < 1e-5,
-            "hundida bajo la gota"
-        );
-    }
-
-    #[test]
-    fn envuelta_sus_canales_son_solo_sus_enlaces() {
-        // uno suyo y uno ajeno que pasa por debajo, entre dos nodos cerca
+        // uno suyo; uno ajeno que pasa por debajo, entre dos nodos cerca; y otro ajeno, que sale del
+        // suyo
         let nodos = [
             nodo(0.0, 0.0, 10.0),
             nodo(25.0, 0.0, 2.0),
             nodo(-15.0, 5.0, 2.0),
             nodo(15.0, 5.0, 2.0),
+            nodo(200.0, 0.0, 2.0),
         ];
-        let rellenar = |libre: bool| {
-            let mut g = GotaGpu::default();
-            let e = Escena {
-                cuenta_nodos: 4,
-                vortice_libre: libre,
-                ..escena()
-            };
-            liquido_cercano(&e, &nodos, &[0, 1, 2, 3], 0, 1.0, &mut g);
-            g
+        liquido_cercano(&e, &nodos, &[0, 1, 2, 3, 1, 4], 0, 1.0, &mut g);
+        assert_eq!(g.cuenta_liquido, [1.0, 1.0, 0.0, 0.0], "el vórtice y su enlace");
+        assert_eq!(g.tubos[0], [0.0, 0.0, 2.5, 0.0], "en radios del vórtice");
+        let cuello = LIQUIDO.cuello * 0.2;
+        assert!((g.anchos[0][0] - cuello).abs() < 1e-6, "el cuello sale del radio menor");
+    }
+
+    #[test]
+    fn el_canal_nunca_copia_el_circulo_del_vortice() {
+        let mut g = GotaGpu::default();
+        let e = Escena {
+            cuenta_nodos: 2,
+            ..escena()
         };
-        let libre = rellenar(true);
-        assert_eq!(libre.cuenta_liquido[1], 2.0, "libre, también el que pasa por debajo");
-        let envuelta = rellenar(false);
-        assert_eq!(
-            envuelta.cuenta_liquido,
-            [1.0, 1.0, 0.0, 0.0],
-            "envuelta, solo la suya y su enlace"
+        let nodos = [nodo(0.0, 0.0, 10.0), nodo(25.0, 0.0, 2.0)];
+        liquido_cercano(&e, &nodos, &[0, 1], 0, 1.0, &mut g);
+        assert!(
+            (g.circulo[2] - LIQUIDO.gota_vortice_hundida).abs() < 1e-5,
+            "hundido bajo la gota"
         );
-        assert_eq!(envuelta.tubos[0], [0.0, 0.0, 2.5, 0.0]);
+    }
+
+    #[test]
+    fn sin_vortice_bien_no_hay_canales() {
+        let mut g = GotaGpu::default();
+        let e = Escena {
+            cuenta_nodos: 2,
+            ..escena()
+        };
+        let nodos = [nodo(f32::NAN, 0.0, 10.0), nodo(25.0, 0.0, 2.0)];
+        liquido_cercano(&e, &nodos, &[0, 1], 0, 1.0, &mut g);
+        assert_eq!(g.cuenta_liquido, [0.0; 4]);
     }
 }

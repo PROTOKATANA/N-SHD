@@ -135,9 +135,10 @@ mínimos y medianas.
 | `gota_sueltos` | Qué líquido está unido al cuerpo de la gota | campo y canales | unido |
 | `gota_pintura` | El contorno, los canales y las bandas, sin los trozos sueltos | campo, canales y unido | la imagen |
 | `pasada_gota` | Las une: el cbuffer, el orden y las transiciones | — | — |
-| `comun/bloque_hlsl` | Iterar un estencil en bloques | — | — |
+| `comun/bloque_hlsl` | Iterar un estencil en bloques (los canales) | — | — |
 | `gota/` (Rust) | `contactos`, `retraso` y `cercano`; `EstadoGota` los une | — | — |
 | `liquido/rejilla` (Rust) | La rejilla de culling del líquido | — | — |
+| `choque` (Rust) | Que los nodos no se toquen (el vórtice no choca) | los nodos | los nodos |
 
 - Ninguna pieza conoce a otra: la pasada les da los buffers que leen (`Lecturas`), y cada una dice
   los que escribe. Interfaces abstractas solo donde hay algo que sustituir (el fluido del vórtice ya
@@ -247,6 +248,65 @@ libre, byte a byte contra la versión anterior.
 - **Donde está el tiempo**: la presión de las partículas (0,212 ms), el líquido de los enlaces
   (0,139), los trozos sueltos (0,103) y el campo (0,082). La presión es la física de la gota, ya
   medida antes en este informe.
+
+## Después: solo la gota envuelta (2026-11-05)
+
+Los nodos quedan con una sola versión, la definitiva: la gota envuelta. Las de prueba se quitan.
+Lo que este informe cuenta antes del vórtice rígido y de la gota libre es historia: esas piezas ya no
+existen.
+
+### Sin el vórtice rígido
+
+- **Qué**: fuera `PasadaVortice`, su fluido (`fluido_gpu`, la interfaz `Fluido`, y `fluido_stam`)
+  y, en Rust, `vortice` y `fluido`, con su parte del puente (`VorticeGpu`, `EstadoVortice` y el
+  diagnóstico y la huella del fluido). Unas 1800 líneas. `comun/bloque_hlsl` se queda, porque lo
+  usan los canales de la gota.
+- **Visor**: una sola escena de nodos, `nodos`. La escena `gota` y la tecla `3` ya no existen.
+- **Prueba**: la gota envuelta, idéntica byte a byte a main en los 811 fotogramas de los cuatro
+  guiones.
+
+### Sin la gota libre
+
+- **Qué**: fuera `Escena :: vortice_libre` y `SHD_GOTA_ENVUELTA`. La gota va siempre envuelta, y
+  `PasadaLiquido` exige la gota (`const DistanciaGota &`): su shader ya no tiene la variante sin
+  anillo (`ANILLO_GOTA`).
+- **Lo que solo usaba la libre**, también fuera:
+  - En el cbuffer de la gota, las 12 gotas de los nodos cercanos (queda una, el círculo del vórtice,
+    `circulo`) y `funde`, la fusión gradual con un tubo ajeno. Envuelta, sus canales son solo sus
+    enlaces, y cada uno se funde del todo.
+  - En `cercano`, la búsqueda de lo ajeno cercano: `distancia_al_centro`, `CERCA_TUBO`, `FUNDE_HASTA` y
+    `FUNDE_BANDA`.
+  - En el líquido de los enlaces, lo que se hundía la gota del vórtice (`nodos[].w`, ahora 0).
+    `gota_vortice_libre` se llama ahora `gota_vortice_hundida`: es lo que se hunde el círculo del
+    vórtice en la silueta de sus canales, para que su líquido no llene el anillo.
+- **Prueba**: los 811 fotogramas de los cuatro guiones, idénticos byte a byte a la gota envuelta de
+  main, también con todo el C++ de los nodos recompilado sobre la cabecera nueva de cxx. 63 pruebas de
+  Rust (las de la libre, fuera; nuevas: sin vórtice no hay anillo, y sin un vórtice bien no hay
+  canales).
+- **Para quien integra**: `Escena` pierde su último campo, `vortice_libre`, y `PasadaLiquido` recibe la gota
+  primero: `PasadaLiquido(* gota , con_rejilla)`.
+
+### Un grafo sin vórtice
+
+- **Qué**: `PasadaLiquido` no se pintaba hasta tener atada la distancia de la gota, y sin vórtice
+  la gota no la crea nunca: el grafo salía vacío (1 color en cada fotograma, solo el fondo). Ahora,
+  sin vórtice, ata una distancia vacía de un elemento, que nadie lee porque ningún nodo es anillo.
+- **Prueba**: con el vórtice a 0 en el visor (un cambio local, fuera del commit), de 1 color a 2918
+  en cada fotograma, con los nueve nodos y sus enlaces. Con vórtice, los 811 fotogramas idénticos.
+  La puerta no corre la GPU, así que esto no lo vigila ninguna prueba.
+
+## Después: los nodos no se tocan (2026-11-05)
+
+- **Qué**: `separar_nodos` (`choque`), el choque del antiguo motor de fuerzas de CORTEX: cada par de
+  nodos más cerca que la suma de sus radios por 1,5 se aparta hasta esa distancia, en hasta 8 pasadas
+  por llamada. El vórtice no choca. Dos cambios sobre el de CORTEX: contra un nodo que el borde acaba
+  de devolver cede el otro entero (antes, a medias, y tras 8 pasadas seguían a 29,92 de 30), y una
+  holgura de una milésima, porque apartar justo hasta tocarse dejaba redondeos que no acababan nunca.
+- **Medida** (CPU, release, malla de 16 × 16 con el vórtice): 21 µs por fotograma sin nadie
+  tocándose, y 168 µs (p95 200) con un nodo arrastrado encima de otro. Con los 9 nodos del menú, nada.
+- **Prueba**: los guiones `1`, `arrastre` y `cerca`, idénticos byte a byte: ningún par se toca. En
+  `pared` los tres nodos se tocaban; ahora la pared se coloca a 48, tan junta como deja el choque, y
+  sus gotas siguen uniéndose. 9 pruebas de Rust nuevas.
 
 ## Lo que pide una decisión
 

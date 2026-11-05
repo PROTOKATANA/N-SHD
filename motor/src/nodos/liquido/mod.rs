@@ -29,9 +29,9 @@ pub struct FormaLiquido {
     pub oscurecer: f32,
     /// La del vórtice, que ocupa su nodo entero: solo asoma alrededor.
     pub gota_vortice: f32,
-    /// La del vórtice que es un líquido suelto: queda debajo de él, para que no asome un círculo
-    /// fijo cuando se deforma. Los enlaces llegan hasta ahí, y el líquido los tapa por su contorno.
-    pub gota_vortice_libre: f32,
+    /// La del vórtice en la silueta de los canales de su gota: queda hundida debajo de ella, para que
+    /// el líquido de los canales no llene el anillo.
+    pub gota_vortice_hundida: f32,
 }
 
 pub const FORMA: FormaLiquido = FormaLiquido {
@@ -41,10 +41,10 @@ pub const FORMA: FormaLiquido = FormaLiquido {
     opacidad: 0.55,
     oscurecer: 0.25,
     gota_vortice: 1.15,
-    gota_vortice_libre: 0.3,
+    gota_vortice_hundida: 0.3,
 };
 
-/// radios del vórtice: lo que asoma, alrededor de la gota envuelta, el anillo que le pinta el
+/// radios del vórtice: lo que asoma, alrededor de su gota, el anillo que le pinta el
 /// líquido de los enlaces. La gota choca con la vista a esa distancia, para que quepa.
 pub const ANILLO: f32 = FORMA.gota_vortice - 1.0;
 
@@ -97,18 +97,11 @@ pub fn rellenar_liquido(
     for (i, p) in n.iter().enumerate() {
         let es_vortice = i + 1 == escena.vortice as usize;
         let radio = p.radio * factor * if es_vortice { encoge_vortice } else { 1.0 };
-        // solo se hunde la gota: el radio sigue siendo el mismo para los enlaces y la fusión
-        let hundir = if es_vortice && escena.vortice_libre {
-            (FORMA.gota_vortice - FORMA.gota_vortice_libre) * p.radio * factor
-        } else {
-            0.0
-        };
-        liquido.nodos[i] = [p.x, p.y, radio, hundir];
+        liquido.nodos[i] = [p.x, p.y, radio, 0.0];
         let [r, g, b, _] = color_rgba(p.rgba);
-        // la del vórtice envuelto es su anillo, que sigue a la gota (`anillo`)
-        let envuelve = es_vortice && !escena.vortice_libre;
-        liquido.colores[i] = [r, g, b, if envuelve { 1.0 } else { 0.0 }];
-        if envuelve {
+        // la del vórtice es su anillo, que sigue a la gota (`anillo`)
+        liquido.colores[i] = [r, g, b, if es_vortice { 1.0 } else { 0.0 }];
+        if es_vortice {
             liquido.anillo = [p.x, p.y, p.radio * factor, ANILLO];
         }
         let margen = radio * (FORMA.gota + FORMA.fusion) + 2.0 / escena.escala;
@@ -248,34 +241,18 @@ mod tests {
         e.vortice = 2;
         rellenar_liquido(&e, &nodos, &[], &mut l, &mut caja, true);
         assert!(cerca(l.nodos[1][2] * FORMA.gota, 20.0 * FORMA.gota_vortice) && cerca(l.nodos[0][2], 5.0));
-        assert!(
-            cerca(l.nodos[1][3], 0.0) && cerca(l.nodos[0][3], 0.0),
-            "rígido, no se hunde"
-        );
+        // y su gota es el anillo, que sigue a la gota del vórtice; la de los demás, no
+        assert!(cerca(l.colores[1][3], 1.0) && cerca(l.colores[0][3], 0.0));
+        assert_eq!(l.anillo, [100.0, 0.0, 20.0, ANILLO]);
     }
 
     #[test]
-    fn la_gota_del_vortice_libre_se_hunde_bajo_el_y_no_cambia_nada_mas() {
+    fn sin_vortice_no_hay_anillo() {
         let nodos = [nodo(0.0, 0.0, 5.0, 0xffff_ffff), nodo(100.0, 0.0, 20.0, 0xffff_ffff)];
-        let rigido = Escena {
-            vortice: 2,
-            ..escena(2)
-        };
-        let libre = Escena {
-            vortice_libre: true,
-            ..rigido
-        };
-        let (mut a, mut b) = (LiquidoGpu::vacio(), LiquidoGpu::vacio());
-        let (mut caja_a, mut caja_b) = ([0.0; 4], [0.0; 4]);
-        rellenar_liquido(&rigido, &nodos, &[0, 1], &mut a, &mut caja_a, true);
-        rellenar_liquido(&libre, &nodos, &[0, 1], &mut b, &mut caja_b, true);
-        // lo que se ve de su gota: gota × radio − lo que se hunde
-        let visible = FORMA.gota * b.nodos[1][2] - b.nodos[1][3];
-        assert!(cerca(visible, 20.0 * FORMA.gota_vortice_libre));
-        assert!(visible < 20.0, "queda debajo del líquido");
-        assert!(cerca(b.nodos[1][2], a.nodos[1][2]), "el radio de los enlaces no cambia");
-        assert_eq!(caja_a, caja_b);
-        assert_eq!(b.nodos[0], a.nodos[0], "los demás nodos, igual");
+        let mut l = LiquidoGpu::vacio();
+        let mut caja = [0.0; 4];
+        rellenar_liquido(&escena(2), &nodos, &[0, 1], &mut l, &mut caja, true);
+        assert!(l.colores.iter().all(|c| c[3] == 0.0) && l.anillo == [0.0; 4]);
     }
 
     // ---- la cuenta del shader (pasada_liquido), copiada aquí ----

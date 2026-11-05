@@ -1,4 +1,4 @@
-//! La gota: el vórtice como un líquido suelto, sin pared. Son partículas que resuelven Navier-Stokes
+//! La gota: el vórtice como un líquido, sin pared. Son partículas que resuelven Navier-Stokes
 //! en la GPU (`nucleo/nodos/pasada_gota`, Position Based Fluids): el volumen se conserva porque cada
 //! partícula es un trozo de líquido, y la forma la deciden la presión, la cohesión y lo que choca.
 //!
@@ -19,8 +19,8 @@ mod retraso;
 
 use super::liquido::FORMA as LIQUIDO;
 use super::puente::{DescGota, Escena, GotaGpu, Nodo};
+pub use cercano::MAX_TUBOS;
 use cercano::liquido_cercano;
-pub use cercano::{MAX_GOTAS, MAX_TUBOS};
 use contactos::Contactos;
 pub use contactos::{MAX_CONTACTOS, MAX_OBSTACULOS};
 use retraso::Retraso;

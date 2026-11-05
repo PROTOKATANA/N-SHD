@@ -23,11 +23,10 @@ cbuffer Gota {
   float4 ritmo;          // subpasos de este fotograma, lo que duró (s), 0, 0
   float4 barrido[4];     // lo que barrió cada obstáculo: dos por elemento
   float4 tubo;           // la forma del líquido de los enlaces : gota, fusión, cuello; lo que cae en una tubería
-  float4 cuenta_liquido; // gotas y tubos del líquido de los enlaces que hay cerca, 0, 0
-  float4 gotas[12];      // sus gotas, en su orden : x, y, radio que se ve, fusión
-  float4 tubos[16];      // sus tubos : un extremo (x, y) y el otro (x, y)
+  float4 cuenta_liquido; // si está el círculo del vórtice (1 o 0) y cuántos de sus enlaces, 0, 0
+  float4 circulo;        // el círculo del vórtice, hundido bajo la gota : x, y, radio que se ve, fusión
+  float4 tubos[16];      // sus enlaces : un extremo (x, y) y el otro (x, y)
   float4 anchos[4];      // la media anchura de cada tubo, cuatro por elemento
-  float4 funde[4];       // lo que se funde la gota con cada tubo, de 0 a 1, cuatro por elemento
 };
 
 static const float TAU = 6.2831853;
@@ -59,8 +58,8 @@ float cohesion_en(float r) {
 }
 
 // El calor al que tiende el líquido, en d del centro de masa : brazos fríos y calientes
-// y más calor hacia el ojo. Es el de PasadaVortice ya asentado, medido, no el de su
-// arranque. Pasa de 1 a propósito : así el rojo del centro queda plano, y lo que se
+// y más calor hacia el ojo. Es el del remolino de fluido que fue antes el vórtice, ya
+// asentado, medido, no el de su arranque. Pasa de 1 a propósito : así el rojo del centro queda plano, y lo que se
 // mezcla a su alrededor no lo apaga
 float calor_remolino(float2 d, float tiempo) {
   float rho = length(d);
@@ -99,14 +98,12 @@ float smin_tubo(float a, float b, float k) {
 }
 
 // La silueta del líquido de los enlaces cerca del vórtice, tal como la pinta
-// PasadaLiquido : sus gotas y luego sus tubos, en el mismo orden y con la misma unión
-// suave. Negativa dentro. Son las paredes de las tuberías : por eso un puente que
-// engorda, porque sus nodos se juntan, es una tubería más ancha
+// PasadaLiquido : el círculo del vórtice y luego sus enlaces, en el mismo orden y con la
+// misma unión suave. Negativa dentro. Son las paredes de las tuberías : por eso un puente
+// que engorda, porque sus nodos se juntan, es una tubería más ancha
 float tuberias(float2 x) {
   float d = 1e9;
-  for (uint k = 0u; k < uint(cuenta_liquido.x); ++k) {
-    d = smin_tubo(length(x - gotas[k].xy) - gotas[k].z, d, gotas[k].w);
-  }
+  if (cuenta_liquido.x > 0.0) d = smin_tubo(length(x - circulo.xy) - circulo.z, d, circulo.w);
   for (uint t = 0u; t < uint(cuenta_liquido.y); ++t) {
     float2 a = tubos[t].xy;
     float2 ab = tubos[t].zw - a;
@@ -118,22 +115,17 @@ float tuberias(float2 x) {
 }
 
 // La misma silueta, unida a la gota como el líquido de los enlaces une un nodo con los
-// suyos : cada enlace y cada gota se funden con ella con su propia suavidad, que crece con
+// suyos : el círculo y cada enlace se funden con ella con su propia suavidad, que crece con
 // el radio del nodo. `cer`, lo lejos que queda la gota. Negativa dentro
 float embudo(float2 x, float cer) {
   float d = tuberias(x);
-  for (uint k = 0u; k < uint(cuenta_liquido.x); ++k) {
-    d = min(d, smin_tubo(length(x - gotas[k].xy) - gotas[k].z, cer, gotas[k].w));
-  }
+  if (cuenta_liquido.x > 0.0) d = min(d, smin_tubo(length(x - circulo.xy) - circulo.z, cer, circulo.w));
   for (uint t = 0u; t < uint(cuenta_liquido.y); ++t) {
     float2 a = tubos[t].xy;
     float2 ab = tubos[t].zw - a;
     float u = saturate(dot(x - a, ab) / max(dot(ab, ab), 1e-6));
     float medio = anchos[t >> 2][t & 3u];
-    // un tubo ajeno se une a la gota poco a poco, según lo cerca que pase : ya está en la
-    // silueta, tal cual, y de golpe tendería un puente hasta él
-    float f = funde[t >> 2][t & 3u];
-    if (f > 0.0) d = min(d, smin_tubo(length(x - a - ab * u) - medio, cer, max(tubo.y * medio / tubo.z * f, 1e-4)));
+    d = min(d, smin_tubo(length(x - a - ab * u) - medio, cer, max(tubo.y * medio / tubo.z, 1e-4)));
   }
   return d;
 }

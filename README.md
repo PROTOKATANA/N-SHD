@@ -28,20 +28,24 @@ disco. Cómo funciona, en `nucleo/agujero/README.md`.
 
 - `PasadaLiquido`: los enlaces como un líquido. Es un campo de distancia evaluado en un quad, con una
   rejilla de culling de celdas tan pequeñas como quepan. Admite 256 nodos y 512 enlaces, porque es para un menú.
-- `PasadaVortice`: un nodo que es un remolino de fluido de verdad dentro de un círculo rígido, Stable Fluids en
-  compute shaders. Al pulsarlo, se agita.
-- `PasadaGota`: el mismo remolino como un líquido suelto, sin pared. Son 4.096 partículas que resuelven
+- `PasadaGota`: el vórtice, un nodo que es un remolino de líquido, sin pared; al pulsarlo, se agita. Son 4.096 partículas que resuelven
   Navier-Stokes (Position Based Fluids): se estira, choca con otros nodos y con los bordes de la vista, y se
   recompone. El líquido vive en el marco de su nodo: arrastrarlo no lo separa del enlace, y solo se mece el borde. El
   color lo lleva el propio líquido: un golpe o un clic lo mezclan, y se asienta poco a poco. Un nodo que se acerca la
-  atrae y la gota lo envuelve, sin cubrir su círculo. Los canales los llena un segundo fluido, en una rejilla, con la
-  forma elástica del líquido de los enlaces: entra por cada canal hasta donde el canal lo deja, en forma de estrella, y
-  rodea los nodos. Cada canal se funde con la gota como el líquido de los enlaces con sus nodos, y sale con el color de su
-  borde, para que se vean como un mismo líquido. Solo se pinta el líquido.
-  Los bordes salen de `Escena`: sin `ancho` y `alto`, no hay. Con `vortice_libre`, `PasadaLiquido` no pinta el círculo
-  del vórtice alrededor, y los enlaces llegan hasta el contorno real del líquido.
+  atrae y la gota lo envuelve, sin cubrir su círculo. Sus canales son solo sus enlaces: los llena un segundo fluido, en
+  una rejilla, con la forma elástica del líquido de los enlaces, y entra por cada uno hasta donde el canal lo deja. Lo
+  ajeno que pasa cerca o por debajo no entra. Cada canal se funde con la gota como el líquido de los enlaces con sus
+  nodos, y sale con el color de su borde, para que se vean como un mismo líquido. Solo se pinta el líquido.
+  La gota va envuelta: `PasadaLiquido` le pinta alrededor un anillo que sigue su forma, en los bordes, en las esquinas
+  y cuando un nodo la atraviesa, porque lee de la gota lo lejos que queda (`DistanciaGota`). Los bordes salen de
+  `Escena`: sin `ancho` y `alto`, no hay, y la gota choca con ellos a lo que asoma el anillo.
   Va en piezas (partículas, campo, canales y pintura; `nucleo/nodos/gota_*`), y con `AGUJERO_RELOJ` se repite bit a
   bit. Cómo se midió y qué se cambió, en `nucleo/nodos/RAYO-LEGO.md`.
+
+Los nodos no se tocan: `separar_nodos` (`shd::nodos::choque`, también desde C++) aparta cada par que queda más cerca
+que la suma de sus radios por `SEPARACION` (1,5), con las gotas de los dos apenas rozándose. El arrastrado no se mueve, y
+un nodo que estaba en la vista no sale de ella por un choque. El vórtice no choca: los nodos atraviesan la gota y la
+deforman. Quien integra lo llama en cada fotograma, después de mover los nodos y antes de preparar las pasadas.
 
 ## Integrar N-SHD
 
@@ -74,6 +78,14 @@ agujero.avanzar(ancho , alto , error) ;     // con el turno de la GPU
 agujero.pintar(ancho , alto) ;
 ```
 
+Las pasadas de los nodos, en este orden: el líquido de los enlaces lee de la gota, y la gota se pinta encima.
+
+```cpp
+auto gota = std :: make_unique<shd :: nodos :: PasadaGota>(shd :: reloj_monotono()) ;
+pasadas.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* gota)) ;   // la gota vive lo que la lista
+pasadas.push_back(std :: move(gota)) ;
+```
+
 Un fotograma de los nodos: rellena `shd :: nodos :: Fotograma` y llama a cada `Pasada` en orden con
 `preparar`, `subir` y, con el objetivo fijado, `dibujar` (`nucleo/nodos/pasada.h`). El cbuffer de la cámara
 es tuyo: `camara_de` te lo da y lo subes tú.
@@ -90,13 +102,13 @@ Lo que un integrador no debe olvidar:
 ```bash
 cmake -S . -B build -DDILIGENT_CORE_SOURCE_DIR=<checkout de DiligentCore v2.5.6>
 cmake --build build --target shd_visor
-build/visor/shd_visor agujero     # o nodos, o gota
+build/visor/shd_visor agujero     # o nodos
 ```
 
 Sin `DILIGENT_CORE_SOURCE_DIR`, CMake descarga DiligentCore fijado al commit. La ventana es XCB, y funciona
 bajo XWayland.
 
-Teclas: `1` el agujero, `2` los nodos, `3` la gota, `q` o `Esc` para salir. En el agujero, el botón izquierdo orbita, el
+Teclas: `1` el agujero, `2` los nodos, `q` o `Esc` para salir. En el agujero, el botón izquierdo orbita, el
 derecho rueda y el doble clic agita. En los nodos, arrastrar mueve cualquier nodo, también el vórtice, contra otro o contra los bordes, y un clic en
 el vórtice lo agita.
 
@@ -117,13 +129,13 @@ AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> AGUJERO_VOLCAR_TIEMPOS=2.5,8,20 SHD_TAM
 Con volcados el visor no presenta en la ventana: presentando, el polvo deja de ser repetible a partir de
 unos 10 s, por una causa sin identificar.
 
-**Banco de la GPU:** con `SHD_BANCO_GPU=1`, en las escenas de nodos, lo que tarda cada pasada y cada tramo de dentro,
+**Banco de la GPU:** con `SHD_BANCO_GPU=1`, en la escena de los nodos, lo que tarda cada pasada y cada tramo de dentro,
 con el mínimo, la mediana y el p95 cada 300 fotogramas y al salir. `SHD_NODOS_MALLA=16x16` dibuja una malla de nodos para medir el
 líquido con un grafo grande:
 
 ```bash
 AGUJERO_RELOJ=1 AGUJERO_VOLCAR=<carpeta> SHD_NODOS_VOLCAR=900 SHD_TAM=800x600 SHD_BANCO_GPU=1 \
-  build/visor/shd_visor gota
+  build/visor/shd_visor nodos
 ```
 
 ## Licencias

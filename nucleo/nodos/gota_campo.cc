@@ -58,7 +58,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     }
   })
   float t = lerp(calor_ent[i], suma / max(pesos, 1e-5), 1.0 - exp(-MEZCLA * dt));
-  // como en PasadaVortice, el frío entra por el borde y dentro manda el flujo : el
+  // como en un remolino, el frío entra por el borde y dentro manda el flujo : el
   // calor lo lleva el líquido, y lo que remueva un golpe se ve mezclarse antes de
   // asentarse. El ojo se recalienta enseguida : por mucho que se remueva, queda rojo
   float2 d = x - medida[0].xy;

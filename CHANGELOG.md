@@ -24,3 +24,16 @@
   son solo sus enlaces, un 70 % más cortos, y choca con la vista a lo que asoma el anillo. Más barata que la libre
   (simular 0,754 ms frente a 0,83; pintar 0,097 frente a 0,13); el líquido, de 0,133 a 0,139. En el visor, con
   `SHD_GOTA_ENVUELTA`. Ver RAYO-LEGO.md.
+- Quitado el vórtice rígido (`PasadaVortice`, su fluido `Fluido` y `fluido_stam`), una versión de prueba: el vórtice de
+  los nodos es la gota. El visor deja una sola escena de nodos, `nodos` (tecla `2`); `gota` y la tecla `3` ya no existen.
+- Quitada la gota libre (`Escena :: vortice_libre`), una versión de prueba: la gota va siempre envuelta, sus canales son
+  solo sus enlaces y `PasadaLiquido` exige la gota (`PasadaLiquido(const DistanciaGota & , bool con_rejilla)`). El
+  visor la abre así sin variables; `SHD_GOTA_ENVUELTA` ya no existe. Fuera también lo que solo usaba la libre: las gotas
+  ajenas y la fusión gradual con los tubos ajenos en el cbuffer de la gota, y lo que se hundía la gota del vórtice en el
+  líquido de los enlaces. La imagen, idéntica byte a byte.
+- `PasadaLiquido` pinta los enlaces de un grafo sin vórtice: esperaba la distancia de la gota, que sin vórtice no se
+  crea nunca, y el grafo salía vacío. Ahora ata una vacía en su lugar; con vórtice, la imagen no cambia.
+- Los nodos no se tocan (`separar_nodos`, `shd::nodos::choque`): el choque del antiguo motor de fuerzas de CORTEX, a
+  1,5 veces la suma de sus radios. El arrastrado no cede, salvo contra un nodo que el borde acaba de devolver, y un
+  choque no saca a un nodo de la vista. El vórtice no choca: los nodos siguen atravesando la gota. El visor lo aplica
+  en cada fotograma, y la pared de su guion `pared` queda tan junta como deja el choque.

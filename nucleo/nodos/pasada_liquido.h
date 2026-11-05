@@ -21,12 +21,12 @@ class PasadaLiquido : public Pasada {
 
 public:
 
-	// `con_rejilla` en false : la lista completa en cada píxel, para comparar
-	// lo que se pinta con y sin rejilla. `gota`, si la hay : la del vórtice envuelto
-	// (sin vórtice libre) es un anillo alrededor de la gota, que sigue su forma. No es
-	// suya : quien las crea la mantiene viva mientras viva esta
+	// `gota`, la del vórtice : la gota del vórtice es un anillo alrededor de ella, que
+	// sigue su forma. No es suya : quien las crea la mantiene viva mientras viva esta.
+	// `con_rejilla` en false : la lista completa en cada píxel, para comparar lo que se
+	// pinta con y sin rejilla
 
-	explicit PasadaLiquido(bool con_rejilla = true , const DistanciaGota * gota = nullptr) ;
+	explicit PasadaLiquido(const DistanciaGota & gota , bool con_rejilla = true) ;
 
 	~PasadaLiquido() override ;
 
@@ -46,9 +46,9 @@ private:
 
 	LiquidoGpu liquido_{} ;
 
-	bool con_rejilla_ ;
+	const DistanciaGota & gota_ ;
 
-	const DistanciaGota * gota_ ;
+	bool con_rejilla_ ;
 
 	// la distancia que tiene atada el pintado : cambia si la gota se rehace
 

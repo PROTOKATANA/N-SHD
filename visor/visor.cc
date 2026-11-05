@@ -2,9 +2,9 @@
 // poner quien integra los shaders. Crea el dispositivo, abre una ventana, pinta
 // en una textura y la copia a la ventana.
 //
-//   shd_visor [agujero|nodos|gota]
+//   shd_visor [agujero|nodos]
 //
-// Teclas : 1 el agujero, 2 los nodos, 3 la gota, q o Esc salir. Agujero : botón izquierdo
+// Teclas : 1 el agujero, 2 los nodos, q o Esc salir. Agujero : botón izquierdo
 // orbita, derecho rueda, doble clic agita. Nodos : arrastrar mueve cualquier nodo,
 // también el vórtice, contra otro nodo o contra los bordes, y un clic en el vórtice
 // lo agita.
@@ -17,8 +17,8 @@
 // nodos solo, para ver los choques sin ratón ; con SHD_NODOS_GUION=arrastre, el
 // vórtice va de lado a lado cada vez más rápido; con SHD_NODOS_GUION=pared, atraviesa una
 // pared de nodos y se aleja; con SHD_NODOS_GUION=cerca, se acerca a un enlace ajeno hasta
-// cruzarlo. Con SHD_GOTA_ENVUELTA, la gota va envuelta en un anillo del líquido de los enlaces
-// que sigue su forma (sin vórtice libre), como en CORTEX.
+// cruzarlo. El vórtice es la gota, envuelta en un anillo del líquido de los enlaces que sigue
+// su forma.
 //
 // El banco, en los nodos : con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y cada tramo
 // de dentro (banco_visor.h); con SHD_NODOS_MALLA=<c>x<f>, una malla de nodos en vez de los
@@ -60,14 +60,9 @@
 
 # include "computo.h"
 
-# include "fluido_stam.h"
-
 # include "pasada_gota.h"
 
 # include "pasada_liquido.h"
-
-# include "pasada_vortice.h"
-
 # include "pipeline_comun.h"
 
 # include "banco_visor.h"
@@ -336,7 +331,7 @@ private:
 
 			case XCB_KEY_PRESS : {
 
-				// códigos de tecla de X : 10 a 12 del 1 al 3; 9 Esc, 24 q
+				// códigos de tecla de X : 10 y 11, el 1 y el 2; 9 Esc, 24 q
 
 				const int k = reinterpret_cast<const xcb_key_press_event_t *>(e)->detail ;
 
@@ -345,9 +340,6 @@ private:
 				if (k == 10) { tecla = 1 ; }
 
 				if (k == 11) { tecla = 2 ; }
-
-				if (k == 12) { tecla = 3 ; }
-
 				break ;
 
 			}
@@ -448,7 +440,7 @@ class EscenaNodos final : public Escena {
 
 public:
 
-	EscenaNodos(const shd :: Gpu & gpu , bool gota) : gota_(gota) , gpu_(gpu) {
+	explicit EscenaNodos(const shd :: Gpu & gpu) : gpu_(gpu) {
 
 		// un vórtice en el centro y ocho nodos alrededor, unidos a él y en anillo
 
@@ -509,27 +501,14 @@ public:
 
 		shd :: Reloj reloj = std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / (fps ? std :: atof(fps) : 60.0)) : shd :: reloj_monotono() ;
 
-		if (gota) {
+		auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
 
-			auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
+		// el líquido lee de la gota lo lejos que queda : su anillo la sigue. Va antes que la gota,
+		// que se pinta encima
 
-			// envuelta, el líquido lee de la gota lo lejos que queda : su anillo la sigue
+		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* la_gota)) ;
 
-			const bool envuelta = std :: getenv("SHD_GOTA_ENVUELTA") != nullptr ;
-
-			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(true , envuelta ? la_gota.get() : nullptr)) ;
-
-			pasadas_.push_back(std :: move(la_gota)) ;
-
-		}
-
-		else {
-
-			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>()) ;
-
-			pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaVortice>(std :: move(reloj) , shd :: nodos :: fabrica_fluido_stam())) ;
-
-		}
+		pasadas_.push_back(std :: move(la_gota)) ;
 
 		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
 
@@ -589,8 +568,6 @@ public:
 
 		escena_.vortice = 1 ;
 
-		escena_.vortice_libre = gota_ && !std :: getenv("SHD_GOTA_ENVUELTA") ;
-
 		escena_.ancho = ancho ;
 
 		escena_.alto = alto ;
@@ -598,6 +575,10 @@ public:
 		agarrar(ancho , alto , raton) ;
 
 		if (guion_) { seguir_guion(ancho) ; }
+
+		// los nodos no se tocan; el vórtice no choca, porque es la gota
+
+		shd :: nodos :: separar_nodos(escena_ , rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size()) , static_cast<std :: uint32_t>(agarrado_ + 1)) ;
 
 		fotograma_ = { escena_ , &nodos_ , &aristas_ , uniforme_ } ;
 
@@ -656,8 +637,6 @@ private:
 	static constexpr std :: uint32_t vuelta_pared = 480 ;
 
 	static constexpr std :: uint32_t vuelta_cerca = 360 ;
-
-	const bool gota_ ;
 
 	const char * nombre_guion_ = std :: getenv("SHD_NODOS_GUION") ;
 
@@ -770,8 +749,9 @@ private:
 
 	}
 
-	// Una pared de tres nodos que se tocan : el vórtice la atraviesa, se queda al otro lado,
-	// se aleja y vuelve. Lo que quede atrapado detrás no debe cruzarla
+	// Una pared de tres nodos tan juntos como deja su choque (separar_nodos), con sus gotas
+	// rozándose : el vórtice la atraviesa, se queda al otro lado, se aleja y vuelve. Lo que
+	// quede atrapado detrás no debe cruzarla
 
 	void seguir_pared() {
 
@@ -779,7 +759,7 @@ private:
 
 		for (std :: size_t i = 1 ; i < nodos_.size() ; i++) {
 
-			const float y = i <= 3 ? (static_cast<float>(i) - 2) * 32 : (i % 2 == 0 ? 180.0f : -180.0f) ;
+			const float y = i <= 3 ? (static_cast<float>(i) - 2) * 16 * 2 * shd :: nodos :: separacion_nodos() : (i % 2 == 0 ? 180.0f : -180.0f) ;
 
 			const float x = i <= 3 ? 0.0f : (static_cast<float>(i / 2) - 2.5f) * 100 ;
 
@@ -1155,7 +1135,7 @@ struct Lienzo {
 
 std :: unique_ptr<Escena> escena_de(int cual , const shd :: Gpu & gpu , std :: uint32_t lienzo_ancho , std :: uint32_t lienzo_alto) {
 
-	if (cual >= 2) { return std :: make_unique<EscenaNodos>(gpu , cual == 3) ; }
+	if (cual == 2) { return std :: make_unique<EscenaNodos>(gpu) ; }
 
 	return std :: make_unique<EscenaAgujero>(gpu , lienzo_ancho , lienzo_alto) ;
 
@@ -1168,9 +1148,6 @@ int main(int argc , char ** argv) {
 	int cual = 1 ;
 
 	if (argc > 1 && std :: strcmp(argv[1] , "nodos") == 0) { cual = 2 ; }
-
-	if (argc > 1 && std :: strcmp(argv[1] , "gota") == 0) { cual = 3 ; }
-
 	Ventana ventana ;
 
 	if (!ventana.abrir("N-SHD")) {
@@ -1355,7 +1332,7 @@ int main(int argc , char ** argv) {
 
 		// los nodos, en los fotogramas pedidos
 
-		if (volcados && cual >= 2) {
+		if (volcados && cual == 2) {
 
 			fotogramas++ ;
 

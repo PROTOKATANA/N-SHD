@@ -47,12 +47,12 @@ cbuffer Liquido {
   float4 forma;           // gota, cuello, fusión, opacidad
   float4 cuenta;          // oscurecer, nodos, enlaces, filas de la rejilla
   float4 rejilla;         // x0, y0, lado de celda (mundo), columnas
-  float4 nodos[256];      // x, y, radio que se ve (mundo), lo que se hunde su gota (mundo)
-  float4 colores[256];    // rgb, y en a si su gota es el anillo de la gota envuelta
+  float4 nodos[256];      // x, y, radio que se ve (mundo), 0
+  float4 colores[256];    // rgb, y en a si su gota es el anillo del vórtice
   uint4 aristas[256];     // dos enlaces por elemento: (a0, b0, a1, b1)
   uint4 celdas[256];      // por celda: inicio (16 bits bajos) y cuántos (16 altos)
   uint4 indices[3068];    // dos elementos de 16 bits por uint: nodo i, o enlace nodos + e
-  float4 anillo;          // la gota envuelta : centro (x, y) y radio (mundo) de su rejilla, y lo que asoma su anillo (radios)
+  float4 anillo;          // la gota del vórtice : centro (x, y) y radio (mundo) de su rejilla, y lo que asoma su anillo (radios)
 };
 struct Entrada { float4 Position : SV_POSITION; float2 Mundo : TEXCOORD0; };
 
@@ -66,7 +66,6 @@ float smin(float a, float b, float k, out float h) {
   return min(a, b) - m * m * k * 0.25;
 }
 
-#ifdef ANILLO_GOTA
 // Lo lejos que queda la gota (DistanciaGota) : en radios, en su rejilla de M × M celdas de ± VISTA
 // radios alrededor de su nodo, entre las cuatro celdas de alrededor. Fuera de la rejilla, lejos
 StructuredBuffer<float> distancia_gota;
@@ -78,17 +77,14 @@ float lejos_de_la_gota(float2 q) {
   int i = a.y * int(M) + a.x;
   return lerp(lerp(distancia_gota[i], distancia_gota[i + 1], f.x), lerp(distancia_gota[i + int(M)], distancia_gota[i + int(M) + 1], f.x), f.y);
 }
-#endif
 
-// La gota de un nodo, negativa dentro. La del vórtice envuelto (colores.a) es un anillo alrededor
-// de su gota, a lo que asoma : no un círculo, sino la gota con su forma, aplastada contra un borde
-// o deformada por un nodo que la atraviesa. Un círculo no la seguía : en una esquina la gota se
-// lo comía, o se salía de él
+// La gota de un nodo, negativa dentro. La del vórtice (colores.a) es un anillo alrededor de su
+// gota, a lo que asoma : no un círculo, sino la gota con su forma, aplastada contra un borde o
+// deformada por un nodo que la atraviesa. Un círculo no la seguía : en una esquina la gota se lo
+// comía, o se salía de él
 float gota_nodo(float2 p, uint e) {
-#ifdef ANILLO_GOTA
   if (colores[e].a > 0.0) return (lejos_de_la_gota((p - anillo.xy) / anillo.z) - anillo.w) * anillo.z;
-#endif
-  return length(p - nodos[e].xy) - forma.x * nodos[e].z + nodos[e].w;
+  return length(p - nodos[e].xy) - forma.x * nodos[e].z;
 }
 
 float4 main(in Entrada i) : SV_TARGET {
@@ -152,9 +148,12 @@ struct PasadaLiquido :: Pipelines {
 
 	RefCntAutoPtr<IBuffer> uniforme ;
 
-	// `con_gota` : con el anillo de la gota envuelta, que lee su distancia
+	// sin vórtice, la gota no tiene distancia : esta, vacía, ocupa su sitio. Nadie la lee,
+	// porque sin vórtice ningún nodo es anillo
 
-	bool crear(const Gpu & gpu , IBuffer * camara , bool con_gota , std :: string & error) {
+	RefCntAutoPtr<IBuffer> sin_gota ;
+
+	bool crear(const Gpu & gpu , IBuffer * camara , std :: string & error) {
 
 		device = gpu.device ;
 
@@ -180,7 +179,8 @@ struct PasadaLiquido :: Pipelines {
 
 		shader.Desc.ShaderType = SHADER_TYPE_PIXEL ;
 
-		const std :: string ps_fuente = con_gota ? "#define ANILLO_GOTA\n#define M " + std :: to_string(lado_canal) + "u\n#define VISTA " + numero_hlsl(desc_gota().vista) + "\n" + liquido_ps : std :: string(liquido_ps) ;
+		// la rejilla de la distancia de la gota : la de sus canales
+		const std :: string ps_fuente = "#define M " + std :: to_string(lado_canal) + "u\n#define VISTA " + numero_hlsl(desc_gota().vista) + "\n" + liquido_ps ;
 
 		shader.Source = ps_fuente.c_str() ;
 
@@ -204,9 +204,13 @@ struct PasadaLiquido :: Pipelines {
 
 		if (!uniforme) { return gpu_fallo(error , "No se pudo crear el uniform del liquido") ; }
 
+		sin_gota = gpu_campo(gpu , { 1 , sizeof(float) , "Nodos liquido sin gota" }) ;
+
+		if (!sin_gota) { return gpu_fallo(error , "No se pudo crear la distancia vacia del liquido") ; }
+
 		GraphicsPipelineStateCreateInfo pso = gpu_pso_mezcla("Nodos liquido") ;
 
-		// con la gota, su distancia se ata después (cambia si la gota se rehace)
+		// la distancia de la gota se ata después (cambia si la gota se rehace)
 
 		const ShaderResourceVariableDesc fijas[] = {
 
@@ -216,15 +220,11 @@ struct PasadaLiquido :: Pipelines {
 
 		} ;
 
-		if (con_gota) {
+		pso.PSODesc.ResourceLayout.DefaultVariableType = SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC ;
 
-			pso.PSODesc.ResourceLayout.DefaultVariableType = SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC ;
+		pso.PSODesc.ResourceLayout.Variables = fijas ;
 
-			pso.PSODesc.ResourceLayout.Variables = fijas ;
-
-			pso.PSODesc.ResourceLayout.NumVariables = 2 ;
-
-		}
+		pso.PSODesc.ResourceLayout.NumVariables = 2 ;
 
 		pso.pVS = vs ;
 
@@ -248,7 +248,7 @@ struct PasadaLiquido :: Pipelines {
 
 } ;
 
-PasadaLiquido :: PasadaLiquido(bool con_rejilla , const DistanciaGota * gota) : con_rejilla_(con_rejilla) , gota_(gota) {}
+PasadaLiquido :: PasadaLiquido(const DistanciaGota & gota , bool con_rejilla) : gota_(gota) , con_rejilla_(con_rejilla) {}
 
 PasadaLiquido :: ~PasadaLiquido() = default ;
 
@@ -258,7 +258,7 @@ bool PasadaLiquido :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu
 
 		auto nuevos = std :: make_unique<Pipelines>() ;
 
-		if (!nuevos->crear(gpu , f.uniforme_camara , gota_ != nullptr , error)) { return false ; }
+		if (!nuevos->crear(gpu , f.uniforme_camara , error)) { return false ; }
 
 		pipes_ = std :: move(nuevos) ;
 
@@ -276,15 +276,18 @@ bool PasadaLiquido :: preparar(const Gpu & gpu , const Fotograma & f , CamaraGpu
 
 }
 
-void PasadaLiquido :: subir(IDeviceContext * ctx , const Fotograma &) {
+void PasadaLiquido :: subir(IDeviceContext * ctx , const Fotograma & f) {
 
 	if (!hay_) { return ; }
 
 	ctx->UpdateBuffer(pipes_->uniforme , 0 , sizeof(liquido_) , &liquido_ , RESOURCE_STATE_TRANSITION_MODE_TRANSITION) ;
 
-	// la distancia de la gota, si cambió (la gota se crea al preparar, después que esta)
+	// la distancia de la gota, si cambió (la gota se crea al preparar, después que esta). Sin
+	// vórtice no la crea nunca : el líquido se pinta sin anillo, con la vacía
 
-	IBuffer * distancia = gota_ ? gota_->distancia_gota() : nullptr ;
+	IBuffer * distancia = gota_.distancia_gota() ;
+
+	if (!distancia && f.escena.vortice == 0) { distancia = pipes_->sin_gota ; }
 
 	if (distancia && distancia != atada_) {
 
@@ -300,9 +303,9 @@ void PasadaLiquido :: dibujar(IDeviceContext * ctx , const Fotograma &) {
 
 	if (!hay_) { return ; }
 
-	// con gota, hasta que su distancia esté atada (el primer fotograma)
+	// hasta que la distancia de la gota esté atada (el primer fotograma, con vórtice)
 
-	if (gota_ && !atada_) { return ; }
+	if (!atada_) { return ; }
 
 	ctx->SetPipelineState(pipes_->pipeline) ;
 
