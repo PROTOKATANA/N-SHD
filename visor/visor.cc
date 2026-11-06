@@ -2,12 +2,14 @@
 // poner quien integra los shaders. Crea el dispositivo, abre una ventana, pinta
 // en una textura y la copia a la ventana.
 //
-//   shd_visor [agujero|nodos]
+//   shd_visor [agujero|nodos|pestanas]
 //
-// Teclas : 1 el agujero, 2 los nodos, q o Esc salir. Agujero : botón izquierdo
+// Teclas : 1 el agujero, 2 los nodos, 3 las pestañas, q o Esc salir. Agujero : botón izquierdo
 // orbita, derecho rueda, doble clic agita. Nodos : arrastrar mueve cualquier nodo,
 // también el vórtice, contra otro nodo o contra los bordes, y un clic en el vórtice
-// lo agita.
+// lo agita. Pestañas : las 40 de la demostración de CORTEX, con su física; arrastrar un nodo
+// lo deja clavado donde se suelta, y el clic derecho lo devuelve a la física. Con
+// SHD_NODOS_GUION, uno se lleva a una esquina, se suelta y luego se libera.
 //
 // Sin ventana, para comparar : con AGUJERO_VOLCAR=<carpeta> y
 // AGUJERO_VOLCAR_TIEMPOS, escribe esos fotogramas en PPM, tal como se ven, y
@@ -41,6 +43,7 @@
 # include <cstring>
 
 # include <memory>
+
 
 # include <string>
 
@@ -97,11 +100,13 @@ struct Raton {
 
 	bool dentro = false ;
 
-	// Toques con el izquierdo y dobles clics desde el último fotograma
+	// Toques con el izquierdo, dobles clics y toques con el derecho desde el último fotograma
 
 	std :: uint32_t toques = 0 ;
 
 	std :: uint32_t dobles = 0 ;
+
+	std :: uint32_t derechos = 0 ;
 
 } ;
 
@@ -265,7 +270,13 @@ private:
 
 	void boton(int cual , bool pulsado , Raton & raton) {
 
-		if (cual == XCB_BUTTON_INDEX_3) { raton.derecho = pulsado ; }
+		if (cual == XCB_BUTTON_INDEX_3) {
+
+			raton.derecho = pulsado ;
+
+			if (pulsado) { raton.derechos++ ; }
+
+		}
 
 		if (cual != XCB_BUTTON_INDEX_1) { return ; }
 
@@ -331,7 +342,7 @@ private:
 
 			case XCB_KEY_PRESS : {
 
-				// códigos de tecla de X : 10 y 11, el 1 y el 2; 9 Esc, 24 q
+				// códigos de tecla de X : 10, 11 y 12, el 1, el 2 y el 3; 9 Esc, 24 q
 
 				const int k = reinterpret_cast<const xcb_key_press_event_t *>(e)->detail ;
 
@@ -340,6 +351,8 @@ private:
 				if (k == 10) { tecla = 1 ; }
 
 				if (k == 11) { tecla = 2 ; }
+
+				if (k == 12) { tecla = 3 ; }
 				break ;
 
 			}
@@ -436,13 +449,246 @@ private:
 
 } ;
 
+// De `a` a `b` entre los fotogramas `desde` y `hasta`, en el fotograma `cuenta` de un guion
+
+float en_tramo(std :: uint32_t cuenta , float a , float b , std :: uint32_t desde , std :: uint32_t hasta) {
+
+	const float t = std :: clamp((static_cast<float>(cuenta) - static_cast<float>(desde)) / static_cast<float>(hasta - desde) , 0.0f , 1.0f) ;
+
+	return a + (b - a) * t ;
+
+}
+
+// Lo que dibuja un grafo, para las escenas de nodos : el líquido de los enlaces y la gota, el cbuffer
+// de la cámara y, con SHD_BANCO_GPU, el banco. No sabe cómo se mueven los nodos : la escena se los da
+// ya movidos en cada fotograma
+
+class PintorGrafo {
+
+public:
+
+	explicit PintorGrafo(const shd :: Gpu & gpu) : gpu_(gpu) {
+
+		const char * fps = std :: getenv("SHD_NODOS_FPS") ;
+
+		shd :: Reloj reloj = std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / (fps ? std :: atof(fps) : 60.0)) : shd :: reloj_monotono() ;
+
+		auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
+
+		// el líquido lee de la gota lo lejos que queda : su anillo la sigue. Va antes que la gota,
+		// que se pinta encima
+
+		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* la_gota)) ;
+
+		pasadas_.push_back(std :: move(la_gota)) ;
+
+		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
+
+		if (std :: getenv("SHD_BANCO_GPU")) {
+
+			banco_ = std :: make_unique<BancoVisor>() ;
+
+			for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+				banco_->nombrar(i , pasadas_[i]->nombre()) ;
+
+				pasadas_[i]->medir(banco_.get() , primer_tramo(i)) ;
+
+			}
+
+		}
+
+	}
+
+	~PintorGrafo() {
+
+		if (!banco_) { return ; }
+
+		apuntar() ;
+
+		banco_->informar() ;
+
+	}
+
+	PintorGrafo(const PintorGrafo &) = delete ;
+
+	PintorGrafo & operator = (const PintorGrafo &) = delete ;
+
+	// Con los nodos ya movidos : la cámara, y cada pasada preparada y subida. Los nodos y las aristas
+	// deben vivir hasta pintar. False si falló
+
+	bool avanzar(
+
+		const shd :: nodos :: Escena & escena ,
+
+		const std :: vector<shd :: nodos :: Nodo> & nodos ,
+
+		const std :: vector<std :: uint32_t> & aristas ,
+
+		std :: uint32_t ancho ,
+
+		std :: uint32_t alto ,
+
+		std :: string & error
+
+	){
+
+		if (!uniforme_) {
+
+			BufferDesc desc ;
+
+			desc.Name = "Visor camara" ;
+
+			desc.Size = sizeof(shd :: nodos :: CamaraGpu) ;
+
+			desc.Usage = USAGE_DEFAULT ;
+
+			desc.BindFlags = BIND_UNIFORM_BUFFER ;
+
+			desc.ImmediateContextMask = gpu_.mascara ;
+
+			gpu_.device->CreateBuffer(desc , nullptr , &uniforme_) ;
+
+			if (!uniforme_) { return shd :: gpu_fallo(error , "No se pudo crear el uniform de la cámara") ; }
+
+		}
+
+		fotograma_ = { escena , &nodos , &aristas , uniforme_ } ;
+
+		camara_ = shd :: nodos :: camara_de(escena , ancho , alto) ;
+
+		for (const auto & p : pasadas_) {
+
+			if (!p->preparar(gpu_ , fotograma_ , camara_ , error)) { return false ; }
+
+		}
+
+		gpu_.ctx->UpdateBuffer(uniforme_ , 0 , sizeof(camara_) , &camara_ , RESOURCE_STATE_TRANSITION_MODE_TRANSITION) ;
+
+		if (banco_ && medidos_++) { apuntar() ; }
+
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: subir , gpu_.device , gpu_.ctx) ;
+
+			pasadas_[i]->subir(gpu_.ctx , fotograma_) ;
+
+		}
+
+		return true ;
+
+	}
+
+	void pintar() {
+
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: dibujar , gpu_.device , gpu_.ctx) ;
+
+			pasadas_[i]->dibujar(gpu_.ctx , fotograma_) ;
+
+		}
+
+	}
+
+private:
+
+	shd :: Gpu gpu_ ;
+
+	std :: vector<std :: unique_ptr<shd :: nodos :: Pasada>> pasadas_ ;
+
+	// El banco (SHD_BANCO_GPU) y los fotogramas medidos. Cada pasada mide lo suyo a
+	// partir de su propio tramo : de 16 en 16 detrás de los de las pasadas
+
+	std :: unique_ptr<BancoVisor> banco_ ;
+
+	std :: uint32_t medidos_ = 0 ;
+
+	std :: size_t primer_tramo(std :: size_t pasada) const { return pasadas_.size() + 16 * pasada ; }
+
+	// Lo del fotograma anterior, ya acabado en la GPU, y un informe cada 300
+
+	void apuntar() {
+
+		banco_->terminar(gpu_.ctx) ;
+
+		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+
+			const std :: vector<std :: string> nombres = pasadas_[i]->tramos() ;
+
+			for (std :: size_t k = 0 ; k < nombres.size() ; k++) { banco_->nombrar(primer_tramo(i) + k , nombres[k]) ; }
+
+		}
+
+		if (medidos_ % 300 == 0) { banco_->informar() ; }
+
+	}
+
+	RefCntAutoPtr<IBuffer> uniforme_ ;
+
+	shd :: nodos :: Fotograma fotograma_{} ;
+
+	shd :: nodos :: CamaraGpu camara_{} ;
+
+} ;
+
+// Los nodos : un vórtice en el centro y ocho nodos alrededor (con SHD_NODOS_MALLA, una malla).
+// Arrastrar mueve cualquier nodo, y un clic en el vórtice sin moverlo lo agita; con SHD_NODOS_GUION
+// se mueven solos. Los nodos no se tocan (separar_nodos)
+
 class EscenaNodos final : public Escena {
 
 public:
 
-	explicit EscenaNodos(const shd :: Gpu & gpu) : gpu_(gpu) {
+	explicit EscenaNodos(const shd :: Gpu & gpu) : pintor_(gpu) { crear_vortice() ; }
 
-		// un vórtice en el centro y ocho nodos alrededor, unidos a él y en anillo
+	bool avanzar(std :: uint32_t ancho , std :: uint32_t alto , const Raton & raton , std :: string & error) override {
+
+		escena_.escala = 1.5f ;
+
+		escena_.factor_radio = 1 ;
+
+		escena_.cuenta_nodos = static_cast<std :: uint32_t>(nodos_.size()) ;
+
+		escena_.ancho = ancho ;
+
+		escena_.alto = alto ;
+
+		agarrar(ancho , alto , raton) ;
+
+		if (guion_) { seguir_guion(ancho) ; }
+
+		// los nodos no se tocan; el vórtice no choca, porque es la gota
+
+		shd :: nodos :: separar_nodos(escena_ , rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size()) , static_cast<std :: uint32_t>(agarrado_ + 1)) ;
+
+		return pintor_.avanzar(escena_ , nodos_ , aristas_ , ancho , alto , error) ;
+
+	}
+
+	void pintar(std :: uint32_t , std :: uint32_t) override { pintor_.pintar() ; }
+
+	const float * fondo() const override { return fondo_ ; }
+
+private:
+
+	std :: vector<shd :: nodos :: Nodo> nodos_ ;
+
+	std :: vector<std :: uint32_t> aristas_ ;
+
+	shd :: nodos :: Escena escena_{} ;
+
+	PintorGrafo pintor_ ;
+
+	const float fondo_[4] = { 0.07f , 0.07f , 0.1f , 1 } ;
+
+	// Un vórtice en el centro y ocho nodos alrededor, unidos a él y en anillo; o, con
+	// SHD_NODOS_MALLA, una malla
+
+	void crear_vortice() {
+
+		escena_.vortice = 1 ;
+
 
 		constexpr int cuantos = 8 ;
 
@@ -496,131 +742,7 @@ public:
 			}
 
 		}
-
-		const char * fps = std :: getenv("SHD_NODOS_FPS") ;
-
-		shd :: Reloj reloj = std :: getenv("AGUJERO_RELOJ") ? shd :: reloj_de_pasos(1.0 / (fps ? std :: atof(fps) : 60.0)) : shd :: reloj_monotono() ;
-
-		auto la_gota = std :: make_unique<shd :: nodos :: PasadaGota>(std :: move(reloj)) ;
-
-		// el líquido lee de la gota lo lejos que queda : su anillo la sigue. Va antes que la gota,
-		// que se pinta encima
-
-		pasadas_.push_back(std :: make_unique<shd :: nodos :: PasadaLiquido>(* la_gota)) ;
-
-		pasadas_.push_back(std :: move(la_gota)) ;
-
-		// con SHD_BANCO_GPU, lo que tarda en la GPU cada pasada y lo que mide cada una por dentro
-
-		if (std :: getenv("SHD_BANCO_GPU")) {
-
-			banco_ = std :: make_unique<BancoVisor>() ;
-
-			for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
-
-				banco_->nombrar(i , pasadas_[i]->nombre()) ;
-
-				pasadas_[i]->medir(banco_.get() , primer_tramo(i)) ;
-
-			}
-
-		}
-
 	}
-
-	~EscenaNodos() override {
-
-		if (!banco_) { return ; }
-
-		apuntar() ;
-
-		banco_->informar() ;
-
-	}
-
-	bool avanzar(std :: uint32_t ancho , std :: uint32_t alto , const Raton & raton , std :: string & error) override {
-
-		if (!uniforme_) {
-
-			BufferDesc desc ;
-
-			desc.Name = "Visor camara" ;
-
-			desc.Size = sizeof(shd :: nodos :: CamaraGpu) ;
-
-			desc.Usage = USAGE_DEFAULT ;
-
-			desc.BindFlags = BIND_UNIFORM_BUFFER ;
-
-			desc.ImmediateContextMask = gpu_.mascara ;
-
-			gpu_.device->CreateBuffer(desc , nullptr , &uniforme_) ;
-
-			if (!uniforme_) { return shd :: gpu_fallo(error , "No se pudo crear el uniform de la cámara") ; }
-
-		}
-
-		escena_.escala = 1.5f ;
-
-		escena_.factor_radio = 1 ;
-
-		escena_.cuenta_nodos = static_cast<std :: uint32_t>(nodos_.size()) ;
-
-		escena_.vortice = 1 ;
-
-		escena_.ancho = ancho ;
-
-		escena_.alto = alto ;
-
-		agarrar(ancho , alto , raton) ;
-
-		if (guion_) { seguir_guion(ancho) ; }
-
-		// los nodos no se tocan; el vórtice no choca, porque es la gota
-
-		shd :: nodos :: separar_nodos(escena_ , rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size()) , static_cast<std :: uint32_t>(agarrado_ + 1)) ;
-
-		fotograma_ = { escena_ , &nodos_ , &aristas_ , uniforme_ } ;
-
-		camara_ = shd :: nodos :: camara_de(escena_ , ancho , alto) ;
-
-		for (const auto & p : pasadas_) {
-
-			if (!p->preparar(gpu_ , fotograma_ , camara_ , error)) { return false ; }
-
-		}
-
-		gpu_.ctx->UpdateBuffer(uniforme_ , 0 , sizeof(camara_) , &camara_ , RESOURCE_STATE_TRANSITION_MODE_TRANSITION) ;
-
-		if (banco_ && medidos_++) { apuntar() ; }
-
-		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
-
-			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: subir , gpu_.device , gpu_.ctx) ;
-
-			pasadas_[i]->subir(gpu_.ctx , fotograma_) ;
-
-		}
-
-		return true ;
-
-	}
-
-	void pintar(std :: uint32_t , std :: uint32_t) override {
-
-		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
-
-			shd :: Tramo tramo(banco_.get() , i , shd :: Etapa :: dibujar , gpu_.device , gpu_.ctx) ;
-
-			pasadas_[i]->dibujar(gpu_.ctx , fotograma_) ;
-
-		}
-
-	}
-
-	const float * fondo() const override { return fondo_ ; }
-
-private:
 
 	static constexpr float radio_vortice = 60 ;
 
@@ -716,15 +838,9 @@ private:
 
 	}
 
-	// De `a` a `b` entre los fotogramas `desde` y `hasta`
+	// De `a` a `b` entre los fotogramas `desde` y `hasta` del guion
 
-	float tramo(float a , float b , std :: uint32_t desde , std :: uint32_t hasta) const {
-
-		const float t = std :: clamp((static_cast<float>(cuenta_) - static_cast<float>(desde)) / static_cast<float>(hasta - desde) , 0.0f , 1.0f) ;
-
-		return a + (b - a) * t ;
-
-	}
+	float tramo(float a , float b , std :: uint32_t desde , std :: uint32_t hasta) const { return en_tramo(cuenta_ , a , b , desde , hasta) ; }
 
 	// Un enlace entre dos nodos que pasa cerca del vórtice, sin ser suyo : el vórtice se le
 	// acerca despacio hasta cruzarlo. Mientras no lo toca, no debe unirse a él
@@ -866,50 +982,303 @@ private:
 
 	}
 
-	shd :: Gpu gpu_ ;
+} ;
+
+// Las pestañas : la demostración de CORTEX (CORTEX_PESTANAS_DEMO) con la física de su grafo
+// (shd::nodos::fisica). Arrastrar un nodo lo deja clavado donde se suelta, y el clic derecho lo
+// devuelve a la física; con SHD_NODOS_GUION, uno se lleva a una esquina, se suelta y luego se libera
+
+class EscenaPestanas final : public Escena {
+
+public:
+
+	explicit EscenaPestanas(const shd :: Gpu & gpu) : pintor_(gpu) {}
+
+	bool avanzar(std :: uint32_t ancho , std :: uint32_t alto , const Raton & raton , std :: string & error) override {
+
+		// a la escala de arranque de CORTEX
+
+		escena_.escala = 1 ;
+
+		escena_.factor_radio = 1 ;
+
+		escena_.cuenta_nodos = static_cast<std :: uint32_t>(nodos_.size()) ;
+
+		escena_.ancho = ancho ;
+
+		escena_.alto = alto ;
+
+		// la física de CORTEX, con su propio choque
+
+		mover_pestanas(ancho , alto , raton) ;
+
+		return pintor_.avanzar(escena_ , nodos_ , aristas_ , ancho , alto , error) ;
+
+	}
+
+	void pintar(std :: uint32_t , std :: uint32_t) override { pintor_.pintar() ; }
+
+	const float * fondo() const override { return fondo_ ; }
+
+private:
 
 	std :: vector<shd :: nodos :: Nodo> nodos_ ;
 
 	std :: vector<std :: uint32_t> aristas_ ;
 
-	std :: vector<std :: unique_ptr<shd :: nodos :: Pasada>> pasadas_ ;
+	shd :: nodos :: Escena escena_{} ;
 
-	// El banco (SHD_BANCO_GPU) y los fotogramas medidos. Cada pasada mide lo suyo a
-	// partir de su propio tramo : de 16 en 16 detrás de los de las pasadas
+	// La física, ya con los nodos asentados y encuadrados : se crea con ellos, así que va detrás
 
-	std :: unique_ptr<BancoVisor> banco_ ;
+	rust :: Box<shd :: nodos :: FisicaGrafo> fisica_ = crear_pestanas() ;
 
-	std :: uint32_t medidos_ = 0 ;
+	// Los bordes que se le dieron
 
-	std :: size_t primer_tramo(std :: size_t pasada) const { return pasadas_.size() + 16 * pasada ; }
+	float bordes_[4] = { 0 , 0 , 0 , 0 } ;
 
-	// Lo del fotograma anterior, ya acabado en la GPU, y un informe cada 300
+	PintorGrafo pintor_ ;
 
-	void apuntar() {
+	const float fondo_[4] = { 0.07f , 0.07f , 0.1f , 1 } ;
 
-		banco_->terminar(gpu_.ctx) ;
+	// La malla mínima de CORTEX (camara.rs), en píxeles : en una vista menor, los bordes no encogen más
 
-		for (std :: size_t i = 0 ; i < pasadas_.size() ; i++) {
+	static constexpr float malla_minima = 600 ;
 
-			const std :: vector<std :: string> nombres = pasadas_[i]->tramos() ;
+	static constexpr std :: uint32_t vuelta_pestanas = 600 ;
 
-			for (std :: size_t k = 0 ; k < nombres.size() ; k++) { banco_->nombrar(primer_tramo(i) + k , nombres[k]) ; }
+	const bool guion_ = std :: getenv("SHD_NODOS_GUION") != nullptr ;
+
+	std :: uint32_t cuenta_ = 0 ;
+
+	int agarrado_ = -1 ;
+
+	bool movido_ = false ;
+
+	// Lo que hay del cursor al centro del nodo agarrado, en mundo; con el guion, de dónde sale
+
+	float agarre_x_ = 0 ;
+
+	float agarre_y_ = 0 ;
+
+	float tramo(float a , float b , std :: uint32_t desde , std :: uint32_t hasta) const { return en_tramo(cuenta_ , a , b , desde , hasta) ; }
+
+	// Las pestañas : la demostración de CORTEX (CORTEX_PESTANAS_DEMO), 40 pestañas. La del login suelta;
+	// cinco grupos de 8, 7, 5, 4 y 6, cada pestaña abierta desde la primera de su grupo o desde la
+	// anterior; y 9 sueltas, cada tercera abierta desde la anterior. Del color de su grupo, como en
+	// el grafo de CORTEX, y las sueltas grises. Devuelve su física, la de CORTEX : sale asentada, y la
+	// cámara la encuadra a escala 1
+
+	rust :: Box<shd :: nodos :: FisicaGrafo> crear_pestanas() {
+
+		const std :: uint32_t colores[] = { 0x89b4faff , 0xa6e3a1ff , 0xf9e2afff , 0xf38ba8ff , 0xcba6f7ff } ;
+
+		constexpr std :: uint32_t sin_grupo = 0xa4a5a5ff ;
+
+		constexpr float radio = 22 ;
+
+		std :: vector<std :: uint32_t> grupos { 5 } ;
+
+		nodos_.push_back({ 0 , 0 , radio , sin_grupo }) ;
+
+		const std :: uint32_t tamanos[] = { 8 , 7 , 5 , 4 , 6 } ;
+
+		for (std :: uint32_t g = 0 ; g < 5 ; g++) {
+
+			const auto primera = static_cast<std :: uint32_t>(nodos_.size()) ;
+
+			for (std :: uint32_t i = 0 ; i < tamanos[g] ; i++) {
+
+				const auto id = static_cast<std :: uint32_t>(nodos_.size()) ;
+
+				nodos_.push_back({ 0 , 0 , radio , colores[g] }) ;
+
+				grupos.push_back(g) ;
+
+				if (i > 0) { aristas_.insert(aristas_.end() , { i % 2 ? primera : id - 1 , id }) ; }
+
+			}
 
 		}
 
-		if (medidos_ % 300 == 0) { banco_->informar() ; }
+		// las sueltas, cada una en su grupo, detrás de los de verdad (como `nodosPestanas`)
+
+		for (std :: uint32_t i = 0 ; i < 9 ; i++) {
+
+			const auto id = static_cast<std :: uint32_t>(nodos_.size()) ;
+
+			nodos_.push_back({ 0 , 0 , radio , sin_grupo }) ;
+
+			grupos.push_back(6 + i) ;
+
+			if (i % 3 == 2) { aristas_.insert(aristas_.end() , { id - 1 , id }) ; }
+
+		}
+
+		std :: vector<float> radios(nodos_.size() , radio) ;
+
+		auto fisica = shd :: nodos :: fisica_grafo(rust :: Slice<const std :: uint32_t>(aristas_.data() , aristas_.size()) , rust :: Slice<const std :: uint32_t>(grupos.data() , grupos.size()) , rust :: Slice<const float>(radios.data() , radios.size())) ;
+
+		fisica->posiciones(rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size())) ;
+
+		// encuadrar (camara.rs de CORTEX) : el centro de la caja de los nodos, a la escala de arranque
+
+		float x0 = nodos_[0].x , y0 = nodos_[0].y , x1 = x0 , y1 = y0 ;
+
+		for (const auto & n : nodos_) {
+
+			x0 = std :: min(x0 , n.x - n.radio) ;
+
+			y0 = std :: min(y0 , n.y - n.radio) ;
+
+			x1 = std :: max(x1 , n.x + n.radio) ;
+
+			y1 = std :: max(y1 , n.y + n.radio) ;
+
+		}
+
+		escena_.centro_x = (x0 + x1) * 0.5f ;
+
+		escena_.centro_y = (y0 + y1) * 0.5f ;
+
+		return fisica ;
 
 	}
 
-	RefCntAutoPtr<IBuffer> uniforme_ ;
+	// Las pestañas, en cada fotograma : los bordes de la física (la vista, con la malla mínima de 600 ×
+	// 600 de CORTEX), el ratón como el de CORTEX (agarre.rs) y un paso de la física
 
-	shd :: nodos :: Escena escena_{} ;
+	void mover_pestanas(std :: uint32_t ancho , std :: uint32_t alto , const Raton & raton) {
 
-	shd :: nodos :: Fotograma fotograma_{} ;
+		auto & fisica = fisica_ ;
 
-	shd :: nodos :: CamaraGpu camara_{} ;
+		const float medio_x = std :: max(static_cast<float>(ancho) , malla_minima) * 0.5f / escena_.escala ;
 
-	const float fondo_[4] = { 0.07f , 0.07f , 0.1f , 1 } ;
+		const float medio_y = std :: max(static_cast<float>(alto) , malla_minima) * 0.5f / escena_.escala ;
+
+		const float bordes[4] = { escena_.centro_x - medio_x , escena_.centro_y - medio_y , escena_.centro_x + medio_x , escena_.centro_y + medio_y } ;
+
+		if (!std :: equal(bordes , bordes + 4 , bordes_)) {
+
+			fisica->limitar(bordes[0] , bordes[1] , bordes[2] , bordes[3] , escena_.factor_radio) ;
+
+			std :: copy(bordes , bordes + 4 , bordes_) ;
+
+		}
+
+		if (guion_) {
+
+			seguir_pestanas() ;
+
+		} else {
+
+			const float x = escena_.centro_x + (raton.x - static_cast<float>(ancho) * 0.5f) / escena_.escala ;
+
+			const float y = escena_.centro_y + (raton.y - static_cast<float>(alto) * 0.5f) / escena_.escala ;
+
+			// pulsar agarra el nodo de debajo; moverlo, pasada la holgura del clic, lo lleva clavado;
+			// soltar lo deja clavado ahí. El clic derecho sobre uno clavado lo devuelve a la física
+
+			if (raton.toques && agarrado_ < 0) {
+
+				agarrado_ = golpear(x , y) ;
+
+				if (agarrado_ >= 0) {
+
+					agarre_x_ = nodos_[static_cast<std :: size_t>(agarrado_)].x - x ;
+
+					agarre_y_ = nodos_[static_cast<std :: size_t>(agarrado_)].y - y ;
+
+					movido_ = false ;
+
+				}
+
+			}
+
+			if (agarrado_ >= 0) {
+
+				const auto i = static_cast<std :: uint32_t>(agarrado_) ;
+
+				movido_ = movido_ || std :: hypot(x + agarre_x_ - nodos_[i].x , y + agarre_y_ - nodos_[i].y) > 2 ;
+
+				if (movido_) { fisica->llevar(i , x + agarre_x_ , y + agarre_y_) ; }
+
+				if (!raton.izquierdo) {
+
+					fisica->soltar() ;
+
+					agarrado_ = -1 ;
+
+				}
+
+			}
+
+			if (raton.derechos) {
+
+				const int i = golpear(x , y) ;
+
+				if (i >= 0 && fisica->clavado(static_cast<std :: uint32_t>(i))) { fisica->liberar(static_cast<std :: uint32_t>(i)) ; }
+
+			}
+
+		}
+
+		fisica->avanzar() ;
+
+		fisica->posiciones(rust :: Slice<shd :: nodos :: Nodo>(nodos_.data() , nodos_.size())) ;
+
+	}
+
+	// El nodo bajo (x, y) en mundo : el más cercano de los que lo cubren con su radio y la holgura
+	// de 6 píxeles de CORTEX; -1, ninguno
+
+	int golpear(float x , float y) const {
+
+		int mejor = -1 ;
+
+		float cerca = 0 ;
+
+		for (std :: size_t i = 0 ; i < nodos_.size() ; i++) {
+
+			const float d = std :: hypot(x - nodos_[i].x , y - nodos_[i].y) ;
+
+			if (d < nodos_[i].radio * escena_.factor_radio + 6 / escena_.escala && (mejor < 0 || d < cerca)) {
+
+				mejor = static_cast<int>(i) ;
+
+				cerca = d ;
+
+			}
+
+		}
+
+		return mejor ;
+
+	}
+
+	// Con guion, las pestañas : asentadas un segundo; la segunda del primer grupo se lleva a una
+	// esquina y se suelta, clavada; a los 6 s vuelve a la física
+
+	void seguir_pestanas() {
+
+		auto & fisica = fisica_ ;
+
+		cuenta_ = cuenta_ % vuelta_pestanas + 1 ;
+
+		if (cuenta_ == 60) {
+
+			agarre_x_ = nodos_[2].x ;
+
+			agarre_y_ = nodos_[2].y ;
+
+		}
+
+		if (cuenta_ >= 60 && cuenta_ <= 120) { fisica->llevar(2 , tramo(agarre_x_ , escena_.centro_x - 500 , 60 , 120) , tramo(agarre_y_ , escena_.centro_y - 280 , 60 , 120)) ; }
+
+		if (cuenta_ == 120) { fisica->soltar() ; }
+
+		if (cuenta_ == 360) { fisica->liberar(2) ; }
+
+	}
 
 } ;
 
@@ -1137,6 +1506,8 @@ std :: unique_ptr<Escena> escena_de(int cual , const shd :: Gpu & gpu , std :: u
 
 	if (cual == 2) { return std :: make_unique<EscenaNodos>(gpu) ; }
 
+	if (cual == 3) { return std :: make_unique<EscenaPestanas>(gpu) ; }
+
 	return std :: make_unique<EscenaAgujero>(gpu , lienzo_ancho , lienzo_alto) ;
 
 }
@@ -1148,6 +1519,8 @@ int main(int argc , char ** argv) {
 	int cual = 1 ;
 
 	if (argc > 1 && std :: strcmp(argv[1] , "nodos") == 0) { cual = 2 ; }
+
+	if (argc > 1 && std :: strcmp(argv[1] , "pestanas") == 0) { cual = 3 ; }
 	Ventana ventana ;
 
 	if (!ventana.abrir("N-SHD")) {
@@ -1324,7 +1697,7 @@ int main(int argc , char ** argv) {
 
 		}
 
-		raton.toques = raton.dobles = 0 ;
+		raton.toques = raton.dobles = raton.derechos = 0 ;
 
 		lienzo.fijar(ctx , escena->fondo()) ;
 
@@ -1332,7 +1705,7 @@ int main(int argc , char ** argv) {
 
 		// los nodos, en los fotogramas pedidos
 
-		if (volcados && cual == 2) {
+		if (volcados && cual >= 2) {
 
 			fotogramas++ ;
 
