@@ -2,6 +2,7 @@
 //!
 //! - [`camara`]: el cbuffer que comparten las pasadas, y la vista.
 //! - [`choque`]: los nodos no se tocan; el vórtice no choca, porque es la gota.
+//! - [`fisica`]: la física de fuerzas del grafo de CORTEX (las pestañas): layout, colocación y órdenes del ratón.
 //! - [`liquido`]: los enlaces como un líquido, con su rejilla de culling.
 //! - [`gota`]: el vórtice como un líquido, envuelto en el anillo del líquido de los enlaces: su reloj,
 //!   lo que choca con él y con qué fuerza.
@@ -10,6 +11,7 @@
 
 pub mod camara;
 pub mod choque;
+pub mod fisica;
 pub mod gota;
 pub mod liquido;
 pub mod puente;

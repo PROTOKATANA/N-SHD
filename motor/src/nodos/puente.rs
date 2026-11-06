@@ -5,6 +5,7 @@
 
 use super::camara::camara_de;
 use super::choque::{separacion_nodos, separar_nodos};
+use super::fisica::grafo::{FisicaGrafo, fisica_grafo};
 use super::gota::{EstadoGota, desc_gota, estado_gota};
 use super::liquido::rellenar_liquido_en_camara as rellenar_liquido;
 
@@ -173,6 +174,33 @@ mod ffi {
 
         /// Lo que se separan dos nodos: la suma de sus radios que se ven por esto.
         fn separacion_nodos() -> f32;
+
+        /// La física del grafo de CORTEX (`fisica`), con su estado: lo que allí hace su hilo, un paso cada vez.
+        type FisicaGrafo;
+
+        /// Sin nada guardado, el grafo asentado y frío. `aristas`, pares de índices; `grupos` y `radios`
+        /// (mundo), uno por nodo.
+        fn fisica_grafo(aristas: &[u32], grupos: &[u32], radios: &[f32]) -> Box<FisicaGrafo>;
+
+        /// Los bordes de la vista (mundo): ningún nodo sale de ellos con su círculo.
+        fn limitar(self: &mut FisicaGrafo, x0: f32, y0: f32, x1: f32, y1: f32, factor_radio: f32);
+
+        /// Lleva el nodo `i` a (x, y) con el ratón: queda clavado y los demás apenas reaccionan.
+        fn llevar(self: &mut FisicaGrafo, i: u32, x: f32, y: f32);
+
+        /// Se soltó el botón: el nodo llevado se queda clavado donde quedó.
+        fn soltar(self: &mut FisicaGrafo);
+
+        /// Desclava el nodo `i` (clic derecho): vuelve con sus vecinos.
+        fn liberar(self: &mut FisicaGrafo, i: u32);
+
+        fn clavado(self: &FisicaGrafo, i: u32) -> bool;
+
+        /// Un paso, si está caliente. True si movió los nodos.
+        fn avanzar(self: &mut FisicaGrafo) -> bool;
+
+        /// Las posiciones, en `nodos` (x, y).
+        fn posiciones(self: &FisicaGrafo, nodos: &mut [Nodo]);
     }
 }
 
