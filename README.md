@@ -47,6 +47,15 @@ que la suma de sus radios por `SEPARACION` (1,5), con las gotas de los dos apena
 un nodo que estaba en la vista no sale de ella por un choque. El vórtice no choca: los nodos atraviesan la gota y la
 deforman. Quien integra lo llama en cada fotograma, después de mover los nodos y antes de preparar las pasadas.
 
+**La física de las pestañas** (`shd::nodos::fisica`): la de fuerzas del grafo de CORTEX, copiada tal cual de su rama
+de las pestañas. Es la de d3-force (Barnes-Hut, muelles, centro y un calor que se enfría) con una atracción de cada nodo
+al centro de su grupo, y fuerzas que se ajustan al número de nodos (`fuerzas_para`). Sale asentada de un tirón
+(`colocacion::colocar`, o donde se guardó cada nodo). Al arrastrar un nodo (`ordenes::llevar`) se queda clavado donde
+se suelta y los demás apenas se mueven; `liberar` lo devuelve a la física. Ningún nodo sale de los bordes que se le
+dan (`Limites`), y no se tocan, con su propio choque. Lo de la aplicación se queda en ella: el hilo que la hace correr
+y dónde se guarda la disposición. Desde C++, `FisicaGrafo` da un paso cada vez que se le pide (`visor/visor.cc`,
+`mover_pestanas`). Da lo mismo que en CORTEX, bit a bit.
+
 ## Integrar N-SHD
 
 - **Rust:** depende del crate `shd` (`motor/`). Si la interfaz va por otro lado, traduce lo que le llegue a
@@ -102,15 +111,17 @@ Lo que un integrador no debe olvidar:
 ```bash
 cmake -S . -B build -DDILIGENT_CORE_SOURCE_DIR=<checkout de DiligentCore v2.5.6>
 cmake --build build --target shd_visor
-build/visor/shd_visor agujero     # o nodos
+build/visor/shd_visor agujero     # o nodos, o pestanas
 ```
 
 Sin `DILIGENT_CORE_SOURCE_DIR`, CMake descarga DiligentCore fijado al commit. La ventana es XCB, y funciona
 bajo XWayland.
 
-Teclas: `1` el agujero, `2` los nodos, `q` o `Esc` para salir. En el agujero, el botón izquierdo orbita, el
-derecho rueda y el doble clic agita. En los nodos, arrastrar mueve cualquier nodo, también el vórtice, contra otro o contra los bordes, y un clic en
-el vórtice lo agita.
+Teclas: `1` el agujero, `2` los nodos, `3` las pestañas, `q` o `Esc` para salir. En el agujero, el botón izquierdo
+orbita, el derecho rueda y el doble clic agita. En los nodos, arrastrar mueve cualquier nodo, también el vórtice,
+contra otro o contra los bordes, y un clic en el vórtice lo agita. En las pestañas, las 40 de la demostración de CORTEX
+con su física: arrastrar un nodo lo deja clavado donde se suelta, y el clic derecho lo devuelve a la física. Con
+`SHD_NODOS_GUION`, uno se lleva a una esquina, se suelta y luego se libera.
 
 ## Comprobaciones
 

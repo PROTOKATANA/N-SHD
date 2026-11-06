@@ -37,3 +37,8 @@
   1,5 veces la suma de sus radios. El arrastrado no cede, salvo contra un nodo que el borde acaba de devolver, y un
   choque no saca a un nodo de la vista. El vórtice no choca: los nodos siguen atravesando la gota. El visor lo aplica
   en cada fotograma, y la pared de su guion `pared` queda tan junta como deja el choque.
+- La física de las pestañas de CORTEX (`shd::nodos::fisica`), copiada tal cual de su rama de las pestañas: el layout
+  de d3 con Barnes-Hut y cúmulos por grupo, `fuerzas_para`, la colocación asentada de un tirón y las órdenes del ratón
+  (llevar clavado, soltar, liberar). Sin rayon, con el mismo resultado bit a bit; el hilo y la disposición guardada se
+  quedan en la aplicación. `FisicaGrafo` la da a C++, y el visor la enseña en la escena `pestanas` (tecla `3`), con las
+  40 pestañas de la demostración de CORTEX.

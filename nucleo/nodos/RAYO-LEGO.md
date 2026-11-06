@@ -139,6 +139,7 @@ mínimos y medianas.
 | `gota/` (Rust) | `contactos`, `retraso` y `cercano`; `EstadoGota` los une | — | — |
 | `liquido/rejilla` (Rust) | La rejilla de culling del líquido | — | — |
 | `choque` (Rust) | Que los nodos no se toquen (el vórtice no choca) | los nodos | los nodos |
+| `fisica` (Rust) | La física de las pestañas de CORTEX: layout, colocación y órdenes del ratón | los enlaces, grupos y radios | las posiciones |
 
 - Ninguna pieza conoce a otra: la pasada les da los buffers que leen (`Lecturas`), y cada una dice
   los que escribe. Interfaces abstractas solo donde hay algo que sustituir (el fluido del vórtice ya
@@ -308,6 +309,76 @@ existen.
   `pared` los tres nodos se tocaban; ahora la pared se coloca a 48, tan junta como deja el choque, y
   sus gotas siguen uniéndose. 9 pruebas de Rust nuevas.
 
+## Después: la física de las pestañas de CORTEX (2026-11-06)
+
+- **Qué**: de las pestañas de CORTEX (rama `pestanas-grafo`) solo sobrevive la vista general en grafo; aquí llega su
+  física, copiada tal cual de `N-CNX/grafo/motor/src/fisica`: `layout`, `colocacion`, `ordenes` y lo común de `mod`.
+  Lo que cambia: la repulsión de Barnes-Hut va en orden y no en paralelo (sin rayon), `Lugar` vive en `colocacion`, y
+  se quedan en CORTEX el hilo (tokio y el almacén de la disposición) y el trait del hub. `FisicaGrafo` hace lo del
+  hilo, un paso cada vez, para C++. El líquido no cambia: como en CORTEX, el de un grupo se funde con el de otro.
+- **Prueba**: las 13 pruebas de CORTEX de esas piezas pasan aquí (las 2 del hilo se quedan allí). Con las 40 pestañas
+  de la demostración, la colocación y un arrastre de 60 pasos con su enfriado dan las mismas posiciones bit a bit que
+  el motor de CORTEX (huellas `dad02733f061fac0` y `0c49aad48903c128` en los dos). Los cuatro guiones de los nodos,
+  811 de 811 fotogramas idénticos a main. En el visor, la escena `pestanas` con el guion, mirada fotograma a fotograma.
+- **Medida** (CPU, release): con las 40 pestañas, 6,2 µs por paso de mediana (p95 9,5) arrastrando un nodo; ver la
+  pasada de RAYO que sigue.
+- **Un primer intento descartado**: una física propia y un líquido por grupos (los enlaces entre grupos quedaban como
+  rayas rectas). Se pidió la de CORTEX, con su mismo comportamiento.
+
+### RAYO y LEGO sobre la física de las pestañas (2026-11-06)
+
+Máquina: 32 hilos, release, un núcleo fijo (`taskset`). La CPU con un banco fuera del repositorio: colocar 15 veces, y
+un arrastre de 600 pasos repetido 5 veces, cada paso medido, con un contador de reservas en el asignador. Grafos: la
+demostración de CORTEX (40 nodos) y la misma seis veces (240, cerca del tope de 256 del líquido). La GPU, con
+`SHD_BANCO_GPU` a 800 × 600, 900 fotogramas.
+
+**Dónde está el tiempo** (§1):
+
+| | 40 nodos | 240 nodos |
+| --- | --- | --- |
+| Un paso arrastrando (mín / mediana / p95) | 4,1 / 6,2 / 9,5 µs | 227 / 243 / 248 µs |
+| Colocar, asentar de un tirón (mediana) | 2,1 ms | 58,6 ms |
+| Reservas por paso | 14 | 16 |
+| GPU: líquido de los enlaces / gota | 0,13 / 0,001 ms | — |
+
+- Quieta, la física no da pasos: 0 µs. Con las 40 pestañas, un paso es el 0,04 % de un fotograma de 16,7 ms; por Amdahl
+  (§1) no hay nada que ganar en el visor. Las reservas tampoco pesan.
+- Con 240 nodos, `perf`: el choque (`apartar`, O(n²) en hasta 9 pasadas) se lleva el 61 % y la repulsión de Barnes-Hut
+  el 34 %.
+- La gota sin vórtice no simula (0,001 ms): ya se salta lo que no debe ejecutarse (§7).
+
+**Medido y no aplicado: saltar de golpe a la siguiente pareja que se toca** (§9, vectorización; §7):
+
+- **Cambio**: `apartar` busca el siguiente `j` que toca a `i` mirando de 8 en 8 sin salir a medias, para que el
+  compilador lo vectorice, y trata esa pareja igual que antes. La búsqueda solo lee y hace las mismas operaciones, así
+  que encuentra las mismas parejas en el mismo orden.
+- **Medida**: con 240 nodos, un paso de 243 a 150 µs (−38 %) y colocar de 58,6 a 35,6 ms; con 40, nada (6,2 → 6,0 µs).
+  Tres tandas alternas, dispersión por debajo del 2 %.
+- **Prueba**: las mismas huellas bit a bit, la colocación (`dad02733f061fac0`, la de CORTEX) y el arrastre, con 40 y
+  240 nodos.
+- **Por qué no se aplica**: con las 40 pestañas no gana nada (§18, optimizar código frío), y aparta la copia del texto
+  de CORTEX. Queda en «Lo que pide una decisión».
+
+**LEGO**:
+
+- **El visor, una escena por responsabilidad**: `EscenaNodos` llevaba también las pestañas, con un indicador y ramas en
+  `avanzar`. Ahora son dos escenas, `EscenaNodos` (el vórtice y sus guiones) y `EscenaPestanas` (la demostración de
+  CORTEX con su física), y lo que dibuja un grafo es una pieza aparte que usan las dos, `PintorGrafo`: las dos pasadas,
+  el cbuffer de la cámara y el banco. Las dos escenas solo mueven los nodos y le dan el fotograma. La física ya no es un
+  `std :: optional` que siempre está: se crea con los nodos asentados. `en_tramo` es el `tramo` de los guiones,
+  común a las dos.
+- **`caja`**, que solo usaban las pruebas, vive en ellas: la de verdad es de la cámara de CORTEX, que se queda allí.
+- **No se toca lo copiado**: `Layout` deja sus campos públicos y `ordenes` los cambia directamente, y el choque de la
+  física (`layout::apartar`) y el de los nodos (`choque`) son dos versiones del mismo choque del antiguo motor de CORTEX.
+  Separarlo sería rediseñar la copia (ver «Lo que pide una decisión»).
+- **Prueba**: los 811 fotogramas de los cuatro guiones de los nodos y 121 de las pestañas con su guion (cada 5 hasta
+  600), idénticos byte a byte a antes de partir el visor. El visor compila sin avisos con `-Wall -Wextra -Wpedantic
+  -Werror`, con GCC y con clang. La puerta, con sus 87 pruebas, pasa.
+
+**Encontrado fuera de esta pasada**: con volcados (`AGUJERO_VOLCAR`, sin presentar), el bucle del visor no llama a
+`FinishFrame`, así que el montón de subidas de Diligent no se vacía: 56,29 MB tras 900 fotogramas, justo 900 cbuffers
+del líquido de 64 KiB. Pasa también en main. Solo afecta a los volcados y al banco, que miden con ese montón creciendo.
+
 ## Lo que pide una decisión
 
 1. **El reparto del líquido en la CPU** (6): de 26 a 63 µs más por fotograma a cambio de hasta
@@ -318,3 +389,11 @@ existen.
    repositorio, y la puerta (`scripts/check.ps1`) no corre la GPU. Llevarlos al visor (una opción
    que cuente los trozos de la gota en blanco y falle si hay alguno) los vigilaría, a cambio de más
    código de pruebas en el visor.
+4. **El choque de la física de las pestañas, vectorizado**: con 240 nodos, de 243 a 150 µs por paso y de 58,6 a 35,6 ms
+   al colocar, con el mismo resultado bit a bit; con 40, nada. Cuesta unas 30 líneas y que la copia ya no sea el texto
+   de CORTEX (si CORTEX usara la de N-SHD, lo ganaría también). Compensa si un integrador pinta grafos de cientos de
+   nodos en el hilo que pinta.
+5. **`FinishFrame` en los volcados del visor**: una línea en el bucle, en su propia rama. Hay que comprobar que los
+   volcados siguen idénticos byte a byte.
+6. **Un solo choque**: `choque` (los nodos) y `layout::apartar` (las pestañas) vienen del mismo choque de CORTEX, con
+   dos cambios en el primero. Unirlos tocaría la copia y cambiaría el resultado de uno de los dos.
